@@ -1,0 +1,48 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# pytest
+.pytest_cache/
+**/.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Build
+dist/
+build/
+
+# SSL / secrets
+ssl-certs/
+code/ssl-certs/
+
+# Env files
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Misc
+*.swp

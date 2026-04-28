@@ -1,0 +1,25 @@
+info:
+  name: Sample PUT Resource
+  type: http
+  seq: 4
+
+http:
+  method: PUT
+  url: https://localhost/api/resources/123
+  auth: inherit
+  headers:
+    Content-Type: application/json
+  body:
+    mode: json
+    json: |
+      {
+        "name": "sample-resource-updated",
+        "description": "full replacement via PUT",
+        "enabled": true
+      }
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
