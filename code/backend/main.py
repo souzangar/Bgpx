@@ -81,6 +81,42 @@ def _stop_subprocess(process: subprocess.Popen | None) -> None:
         process.kill()
 
 
+def _is_api_path(full_path: str) -> bool:
+    """Return True when the requested catch-all path targets API routes."""
+    return full_path == "api" or full_path.startswith("api/")
+
+
+def _is_assets_path(full_path: str) -> bool:
+    """Return True when the requested catch-all path targets asset routes."""
+    return full_path == "assets" or full_path.startswith("assets/")
+
+
+def _build_dev_redirect_target(base_url: str, full_path: str, query: str) -> str:
+    """Build redirect target URL for frontend development mode."""
+    target = f"{base_url}/{full_path.lstrip('/')}" if full_path else f"{base_url}/"
+    if query:
+        return f"{target}?{query}"
+    return target
+
+
+def _ensure_not_found(condition: bool, detail: str = "Not Found") -> None:
+    """Raise an HTTP 404 when condition is true."""
+    if condition:
+        raise HTTPException(status_code=404, detail=detail)
+
+
+def _serve_frontend_index(frontend_dist: Path) -> FileResponse:
+    """Serve built frontend index.html or raise when dist output is missing."""
+    index_file = frontend_dist / "index.html"
+    if not index_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Frontend build not found. Run npm run build in code/frontend.",
+        )
+
+    return FileResponse(index_file)
+
+
 def _start_frontend_dev_server(frontend_dev_url: str, frontend_dir: Path) -> subprocess.Popen | None:
     """Start Vite dev server for single-terminal development mode."""
     host, port = _extract_host_port(frontend_dev_url)
@@ -134,33 +170,25 @@ def create_app(frontend_mode: str | None = None, frontend_dev_url: str | None = 
     if resolved_frontend_mode == "dist" and assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
+    @app.get(
+        "/{full_path:path}",
+        include_in_schema=False,
+        responses={404: {"description": "Not Found"}},
+    )
     def serve_frontend(full_path: str, request: Request) -> Response:
         """Serve SPA routes from build output or redirect to Vite dev server."""
-        if full_path == "api" or full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="Not Found")
+        _ensure_not_found(_is_api_path(full_path))
 
         if resolved_frontend_mode == "dev":
-            target = (
-                f"{resolved_frontend_dev_url}/{full_path.lstrip('/')}"
-                if full_path
-                else f"{resolved_frontend_dev_url}/"
+            target = _build_dev_redirect_target(
+                resolved_frontend_dev_url,
+                full_path,
+                request.url.query,
             )
-            if request.url.query:
-                target = f"{target}?{request.url.query}"
             return RedirectResponse(url=target, status_code=307)
 
-        if full_path == "assets" or full_path.startswith("assets/"):
-            raise HTTPException(status_code=404, detail="Not Found")
-
-        index_file = frontend_dist / "index.html"
-        if not index_file.exists():
-            raise HTTPException(
-                status_code=404,
-                detail="Frontend build not found. Run npm run build in code/frontend.",
-            )
-
-        return FileResponse(index_file)
+        _ensure_not_found(_is_assets_path(full_path))
+        return _serve_frontend_index(frontend_dist)
 
     return app
 

@@ -1,5 +1,4 @@
 import { Gauge, Route } from 'lucide-react'
-import type { FormEvent } from 'react'
 
 import { Button } from '../components/Button'
 import { ResultPanel } from '../components/ResultPanel'
@@ -27,7 +26,9 @@ interface ToolsProps {
   onRunTraceroute: () => void
 }
 
-function PingSummary({ result }: { result: PingResponse }) {
+type FormSubmitEvent = Parameters<NonNullable<React.ComponentProps<'form'>['onSubmit']>>[0]
+
+function PingSummary({ result }: Readonly<{ result: PingResponse }>) {
   return (
     <dl className="grid gap-3 sm:grid-cols-3">
       <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
@@ -46,7 +47,7 @@ function PingSummary({ result }: { result: PingResponse }) {
   )
 }
 
-function TracerouteTable({ hops }: { hops: TracerouteHopResponse[] }) {
+function TracerouteTable({ hops }: Readonly<{ hops: TracerouteHopResponse[] }>) {
   if (hops.length === 0) {
     return <p className="text-sm text-slate-400">No hops returned.</p>
   }
@@ -88,13 +89,13 @@ export function Tools({
   tracerouteState,
   onTracerouteHostChange,
   onRunTraceroute,
-}: ToolsProps) {
-  const handlePingSubmit = (event: FormEvent<HTMLFormElement>) => {
+}: Readonly<ToolsProps>) {
+  const handlePingSubmit = (event: FormSubmitEvent) => {
     event.preventDefault()
     onRunPing()
   }
 
-  const handleTracerouteSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleTracerouteSubmit = (event: FormSubmitEvent) => {
     event.preventDefault()
     onRunTraceroute()
   }

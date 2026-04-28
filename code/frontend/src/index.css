@@ -48,8 +48,8 @@ body {
 }
 
 ::selection {
-  background: rgba(56, 189, 248, 0.28);
-  color: #ffffff;
+  background: #38bdf8;
+  color: #020617;
 }
 
 .bg-grid {

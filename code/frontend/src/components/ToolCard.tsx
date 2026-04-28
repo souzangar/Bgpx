@@ -9,7 +9,7 @@ interface ToolCardProps {
   children: ReactNode
 }
 
-export function ToolCard({ id, title, description, icon: Icon, children }: ToolCardProps) {
+export function ToolCard({ id, title, description, icon: Icon, children }: Readonly<ToolCardProps>) {
   return (
     <section
       id={id}

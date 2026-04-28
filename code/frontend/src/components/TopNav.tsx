@@ -18,7 +18,7 @@ const healthClassName: Record<HealthIndicatorTone, string> = {
   pending: 'border-slate-600/70 bg-slate-900/70 text-slate-300',
 }
 
-export function TopNav({ healthLabel, healthTone, onFocusPrimaryInput }: TopNavProps) {
+export function TopNav({ healthLabel, healthTone, onFocusPrimaryInput }: Readonly<TopNavProps>) {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:h-20 sm:gap-4">

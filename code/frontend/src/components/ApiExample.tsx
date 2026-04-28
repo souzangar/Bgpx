@@ -5,7 +5,7 @@ interface ApiExampleProps {
   command: string
 }
 
-export function ApiExample({ title, command }: ApiExampleProps) {
+export function ApiExample({ title, command }: Readonly<ApiExampleProps>) {
   return (
     <article className="space-y-3 rounded-xl border border-slate-800/80 bg-slate-950/60 p-4">
       <h3 className="text-sm font-semibold text-slate-100">{title}</h3>

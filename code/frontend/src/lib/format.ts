@@ -2,7 +2,15 @@ export function formatJson(value: unknown): string {
   try {
     return JSON.stringify(value, null, 2)
   } catch {
-    return String(value)
+    if (value instanceof Error) {
+      return value.message || value.name
+    }
+
+    if (typeof value === 'string') {
+      return value
+    }
+
+    return 'Unable to format value as JSON.'
   }
 }
 

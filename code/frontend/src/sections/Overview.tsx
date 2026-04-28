@@ -5,7 +5,7 @@ interface OverviewProps {
   apiStatusTone: StatusTone
 }
 
-export function Overview({ apiStatusLabel, apiStatusTone }: OverviewProps) {
+export function Overview({ apiStatusLabel, apiStatusTone }: Readonly<OverviewProps>) {
   return (
     <section id="quick-start" className="scroll-mt-28 space-y-6">
       <div>

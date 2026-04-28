@@ -5,7 +5,7 @@ interface CodeBlockProps {
   className?: string
 }
 
-export function CodeBlock({ code, className }: CodeBlockProps) {
+export function CodeBlock({ code, className }: Readonly<CodeBlockProps>) {
   return (
     <pre
       className={clsx(

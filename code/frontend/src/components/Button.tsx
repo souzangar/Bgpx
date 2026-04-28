@@ -14,6 +14,6 @@ const variantClass: Record<ButtonVariant, string> = {
     'rounded-full bg-slate-800 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-400',
 }
 
-export function Button({ variant = 'primary', className, type = 'button', ...props }: ButtonProps) {
+export function Button({ variant = 'primary', className, type = 'button', ...props }: Readonly<ButtonProps>) {
   return <button type={type} className={clsx(variantClass[variant], 'transition', className)} {...props} />
 }

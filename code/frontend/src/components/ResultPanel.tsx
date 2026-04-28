@@ -19,7 +19,7 @@ export function ResultPanel({
   data,
   emptyMessage,
   children,
-}: ResultPanelProps) {
+}: Readonly<ResultPanelProps>) {
   if (loading) {
     return (
       <div className="rounded-xl border border-sky-400/25 bg-sky-950/30 p-4 text-sm text-sky-100">

@@ -16,7 +16,7 @@ export function TextInput({
   description,
   disabled = false,
   onChange,
-}: TextInputProps) {
+}: Readonly<TextInputProps>) {
   return (
     <div className="space-y-2">
       <label htmlFor={id} className="block text-sm font-medium text-slate-200">

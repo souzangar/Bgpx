@@ -16,7 +16,7 @@ const toneClasses: Record<StatusTone, string> = {
   slate: 'border-slate-700/80 bg-slate-900/60 text-slate-200',
 }
 
-export function StatusCard({ label, value, detail, tone = 'slate' }: StatusCardProps) {
+export function StatusCard({ label, value, detail, tone = 'slate' }: Readonly<StatusCardProps>) {
   return (
     <article className={clsx('rounded-xl border p-4', toneClasses[tone])}>
       <p className="text-xs font-mono uppercase tracking-[0.22em] text-slate-400">{label}</p>
