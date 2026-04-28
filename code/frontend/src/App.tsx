@@ -1,16 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { BackgroundDecor } from './components/BackgroundDecor'
-import { LeftSidebar } from './components/LeftSidebar'
-import { RightToc } from './components/RightToc'
-import { type StatusTone } from './components/StatusCard'
 import { TopNav, type HealthIndicatorTone } from './components/TopNav'
 import { fetchHealth, fetchPing, fetchTraceroute } from './lib/api'
 import { normalizeHostInput, toErrorMessage, validateHostInput } from './lib/format'
 import type { HealthResponse, PingResponse, RequestState, TracerouteResponse } from './lib/types'
 import { ApiExamples } from './sections/ApiExamples'
 import { Hero } from './sections/Hero'
-import { Overview } from './sections/Overview'
 import { Tools } from './sections/Tools'
 
 function emptyState<T>(): RequestState<T> {
@@ -37,27 +33,6 @@ function App() {
   const healthAbortRef = useRef<AbortController | null>(null)
   const pingAbortRef = useRef<AbortController | null>(null)
   const tracerouteAbortRef = useRef<AbortController | null>(null)
-
-  const refreshHealth = useCallback(async () => {
-    healthAbortRef.current?.abort()
-    const controller = new AbortController()
-    healthAbortRef.current = controller
-
-    setHealthState((previous) => ({ ...previous, loading: true, error: null }))
-
-    try {
-      const result = await fetchHealth(controller.signal)
-      if (controller.signal.aborted) {
-        return
-      }
-      setHealthState({ loading: false, error: null, data: result })
-    } catch (error) {
-      if (controller.signal.aborted) {
-        return
-      }
-      setHealthState({ loading: false, error: toErrorMessage(error), data: null })
-    }
-  }, [])
 
   const runPing = useCallback(async () => {
     const host = normalizeHostInput(pingHost)
@@ -172,36 +147,15 @@ function App() {
     return { label: 'API degraded', tone: 'warning' }
   }, [healthState])
 
-  const apiStatusTone: StatusTone = healthState.error
-    ? 'red'
-    : healthState.loading
-      ? 'amber'
-      : healthState.data?.status.toLowerCase() === 'ok'
-        ? 'green'
-        : 'amber'
-
-  const apiStatusLabel = healthState.error
-    ? 'Error'
-    : healthState.loading
-      ? 'Checking'
-      : healthState.data?.status === 'ok'
-        ? 'Online'
-        : 'Degraded'
-
   return (
     <div className="min-h-screen bg-bgpx-black text-bgpx-ink">
       <BackgroundDecor />
       <TopNav healthLabel={topNavHealth.label} healthTone={topNavHealth.tone} onFocusPrimaryInput={focusPingInput} />
 
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-8 md:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_14rem]">
-        <LeftSidebar />
-
+      <div className="mx-auto max-w-7xl px-4 py-8">
         <main className="min-w-0 space-y-10">
           <Hero onRunCheck={focusPingInput} onViewExamples={scrollToExamples} />
-          <Overview apiStatusLabel={apiStatusLabel} apiStatusTone={apiStatusTone} />
           <Tools
-            healthState={healthState}
-            onRefreshHealth={refreshHealth}
             pingHost={pingHost}
             pingValidationError={pingValidationError}
             pingState={pingState}
@@ -215,8 +169,6 @@ function App() {
           />
           <ApiExamples />
         </main>
-
-        <RightToc />
       </div>
     </div>
   )

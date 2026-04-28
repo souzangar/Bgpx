@@ -1,4 +1,4 @@
-import { Activity, Gauge, Route } from 'lucide-react'
+import { Gauge, Route } from 'lucide-react'
 import type { FormEvent } from 'react'
 
 import { Button } from '../components/Button'
@@ -7,7 +7,6 @@ import { TextInput } from '../components/TextInput'
 import { ToolCard } from '../components/ToolCard'
 import { formatMs, formatPercent } from '../lib/format'
 import type {
-  HealthResponse,
   PingResponse,
   RequestState,
   TracerouteHopResponse,
@@ -15,9 +14,6 @@ import type {
 } from '../lib/types'
 
 interface ToolsProps {
-  healthState: RequestState<HealthResponse>
-  onRefreshHealth: () => void
-
   pingHost: string
   pingValidationError: string | null
   pingState: RequestState<PingResponse>
@@ -82,8 +78,6 @@ function TracerouteTable({ hops }: { hops: TracerouteHopResponse[] }) {
 }
 
 export function Tools({
-  healthState,
-  onRefreshHealth,
   pingHost,
   pingValidationError,
   pingState,
@@ -107,39 +101,6 @@ export function Tools({
 
   return (
     <section className="space-y-5">
-      <ToolCard
-        id="health"
-        icon={Activity}
-        title="Health check"
-        description="Query backend service status and verify API availability."
-      >
-        <div className="flex justify-end">
-          <Button variant="secondary" onClick={onRefreshHealth} disabled={healthState.loading}>
-            {healthState.loading ? 'Checking…' : 'Refresh health'}
-          </Button>
-        </div>
-        <ResultPanel
-          loading={healthState.loading}
-          loadingMessage="Checking API health..."
-          error={healthState.error}
-          data={healthState.data}
-          emptyMessage="Run the health check to get current backend status."
-        >
-          {healthState.data ? (
-            <dl className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
-                <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Status</dt>
-                <dd className="mt-1 text-sm font-semibold text-slate-100">{healthState.data.status}</dd>
-              </div>
-              <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
-                <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Service</dt>
-                <dd className="mt-1 text-sm font-semibold text-slate-100">{healthState.data.service}</dd>
-              </div>
-            </dl>
-          ) : null}
-        </ResultPanel>
-      </ToolCard>
-
       <ToolCard
         id="ping"
         icon={Gauge}
