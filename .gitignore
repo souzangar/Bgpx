@@ -34,6 +34,7 @@ dist/
 build/
 
 # SSL / secrets
+!code/ssl-certs/.gitkeep
 ssl-certs/
 code/ssl-certs/
 
