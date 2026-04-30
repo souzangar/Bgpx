@@ -30,7 +30,7 @@ class SSLFiles:
 
 def default_ssl_cert_dir() -> Path:
     """Return the repository SSL certificate directory."""
-    return Path(__file__).resolve().parents[2] / "ssl-certs"
+    return Path(__file__).resolve().parents[3] / "ssl-certs"
 
 
 def ensure_ssl_files(cert_dir: Path | None = None) -> SSLFiles:
