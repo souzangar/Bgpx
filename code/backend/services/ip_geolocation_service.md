@@ -4,7 +4,14 @@ This document defines the design and implementation plan for the backend IP geol
 
 Location target:
 - Service doc: `code/backend/services/ip_geolocation_service.md`
-- Service module: `code/backend/services/ip_geolocation_service.py`
+- Current service module: `code/backend/services/ip_geolocation_service.py`
+- Planned modular service packages:
+  - `code/backend/services/ip_geolocation/ip_geolocation_service.py`
+  - `code/backend/services/ip_geolocation/ip_geolocation_data_refresher.py`
+  - `code/backend/services/background_task_runner/background_task_runner.py`
+
+Related service docs:
+- `code/backend/services/background_task_runner_service.md` (generic runner lifecycle/scheduling contract)
 
 ---
 
@@ -31,6 +38,26 @@ Expected flow:
 - Service layer owns business/runtime behavior
 - Infra reads/parses source payloads
 - Models define shared contracts
+
+### 2.1 Planned service package boundaries (for reusable background updates)
+
+To support future features that need the same auto-refresh behavior, split responsibilities into:
+
+```text
+code/backend/services/
+  ip_geolocation/
+    ip_geolocation_service.py
+    ip_geolocation_data_refresher.py
+
+  background_task_runner/
+    background_task_runner.py
+    task_contracts.py              # optional protocols/interfaces
+```
+
+Boundary rule:
+- Keep `background_task_runner` generic (looping, cancellation, scheduling interval, error boundaries).
+- Keep `ip_geolocation_data_refresher` domain-specific (fingerprint check, reload decision, snapshot swap, geo-specific status).
+- Do **not** place domain refreshers under `background_task_runner/tasks/...`.
 
 ---
 
@@ -86,14 +113,18 @@ Infra modules:
 - `ip_geolocation_ipinfo_json_file_reader_adapter.py`
 - `ip_geolocation_ipinfo_payload_parser.py`
 
-Service module:
-- `ip_geolocation_service.py`
+Service modules:
+- `ip_geolocation/ip_geolocation_service.py`
+- `ip_geolocation/ip_geolocation_data_refresher.py`
+- `background_task_runner/background_task_runner.py`
 
 Method naming examples:
 - `initialize_ip_geolocation_dataset()`
 - `lookup_ip_geolocation(ip: str)`
 - `get_ip_geolocation_load_status()`
 - `reload_ip_geolocation_dataset()`
+- `start_ip_geolocation_source_watch()`
+- `stop_ip_geolocation_source_watch()`
 
 ---
 
@@ -126,6 +157,12 @@ Method naming examples:
    - validate required geo keys per record
    - normalize host-IP networks to `/32`
    - gracefully skip or fail-fast based on configured strictness
+
+7. Source-change-driven cache refresh
+   - detect source file updates and refresh in-memory dataset without process restart
+   - use lightweight file fingerprint trigger (`inode` + `mtime_ns`)
+   - rebuild fresh cache snapshot and atomically swap only on successful parse
+   - keep old cache active if reload fails
 
 ---
 
@@ -264,12 +301,69 @@ This prevents downtime while avoiding ambiguous response semantics.
 
 ## 8) Concurrency and Safety
 
-The service should enforce:
-- Single active loader task (lock/event)
-- Read-safe access to in-memory structures during load
-- Controlled reload behavior (optional atomic swap)
+Race-condition prevention should be implemented as a **two-layer model**:
 
-No duplicate full-dataset loads should run concurrently.
+1. **Runner-level lifecycle safety** (`background_task_runner`) for all current/future background tasks.
+2. **Task-level state publication safety** (`ip_geolocation_data_refresher`) for domain-specific shared data.
+
+This split gives both:
+- reusable platform standards across tasks,
+- high-performance domain correctness for geolocation cache reads/writes.
+
+### 8.1 Background task runner ownership and contract reference
+
+All generic runner lifecycle, overlap, cancellation, and error-boundary behavior is documented in:
+- `code/backend/services/background_task_runner_service.md`
+
+This IP geolocation document intentionally keeps only integration expectations.
+
+### 8.2 Task-level state publication standard (IP geolocation refresher)
+
+`ip_geolocation_data_refresher` should enforce domain-level data safety:
+
+1. Parse and build a **new immutable snapshot** off the active read path.
+2. Validate fully before publication.
+3. Publish via **atomic snapshot swap** (`active_cache <- new_snapshot`).
+4. On reload failure, keep old snapshot active.
+
+Performance guidance:
+- Prefer lock-free read path against immutable snapshots.
+- If a lock is needed, keep it around only the tiny publication/status update boundary, not parsing.
+
+### 8.3 In-memory cache refresh on source file replacement/edit
+
+Because `ipinfo-geo.json` may be replaced multiple times per day, the service should support automatic refresh.
+
+Recommended runtime behavior:
+
+1. Start a background watcher/poller at service initialization.
+2. Poll source file metadata on a short interval (e.g. `1-2s`).
+3. Track this lightweight fingerprint from `os.stat(...)`:
+   - `st_ino` (inode)
+   - `st_mtime_ns` (nanosecond mtime)
+4. If fingerprint changed, debounce briefly (e.g. `300-1000ms`) and trigger reload.
+5. Reload by parsing file into a **new** in-memory snapshot (do not mutate active cache in place).
+6. On successful parse/validation, atomically swap `active_cache <- new_snapshot`.
+7. On parse failure, keep old cache, mark reload failure metrics/status, and continue serving requests.
+
+Ownership note:
+- Poll loop lifecycle and overlap prevention should be hosted by `background_task_runner`.
+- IP geolocation refresh logic should be hosted by `ip_geolocation_data_refresher`.
+- For exact runner guarantees and APIs, follow `background_task_runner_service.md`.
+
+Notes:
+- This design avoids expensive full-file hashing checks on every poll for GB-sized files.
+- `inode + mtime_ns` is the chosen practical trigger for this project's controlled update workflow.
+- Atomic swap guarantees readers never see partial/half-built cache state.
+
+### 8.4 Writer-side contract (important)
+
+The process that updates `ipinfo-geo.json` should use atomic replace semantics:
+
+1. Write new dataset to a temporary file in the same directory.
+2. Rename temp file to `ipinfo-geo.json`.
+
+This minimizes partial-write exposure and makes inode/mtime-based detection reliable in practice.
 
 ---
 
@@ -289,6 +383,12 @@ Planned methods:
 
 - `reload_ip_geolocation_dataset() -> None` (optional)
   - manual refresh entrypoint
+
+- `start_ip_geolocation_source_watch() -> None` (optional)
+  - register/start IP geolocation refresher task in background task runner
+
+- `stop_ip_geolocation_source_watch() -> None` (optional)
+  - unregister/stop IP geolocation refresher task from background task runner
 
 ---
 
@@ -315,6 +415,9 @@ Suggested env vars:
 - `IP_GEO_BATCH_SIZE`
 - `IP_GEO_MAX_BAD_LINES` (maximum tolerated malformed lines before fail)
 - `IP_GEO_NORMALIZE_HOST_IP` (`true` by default; converts bare host IPs to `/32`)
+- `IP_GEO_WATCH_ENABLED` (`true` by default)
+- `IP_GEO_WATCH_INTERVAL_SECONDS` (default: `1.0`)
+- `IP_GEO_WATCH_DEBOUNCE_MS` (default: `500`)
 
 ---
 
@@ -333,12 +436,17 @@ Unit tests:
   - bare host IP normalized to `/32`
 - nullable ASN field handling (`asn`, `as_name`, `as_domain`)
 - malformed-line counters and strictness threshold behavior
+- source-change refresh trigger behavior (`inode`/`mtime_ns` changes)
+- unchanged source metadata should not trigger reload
+- failed hot-reload keeps previous active cache
+- successful hot-reload atomically swaps to new cache
 
 Integration tests:
 - route wiring for `/api/geo/lookup` and `/api/geo/status`
 - payload contract consistency
 - startup progressive load with `resolution_state = "initializing_db"` during in-flight load
 - status payload includes total/loaded/failed-line metrics
+- replacing `ipinfo-geo.json` during runtime refreshes lookup results without process restart
 
 Use small fixture **NDJSON** files for deterministic tests.
 
