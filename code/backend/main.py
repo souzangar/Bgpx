@@ -23,7 +23,7 @@ from services.sslCert import ensure_ssl_files
 
 FRONTEND_MODE_ENV = "BGPX_FRONTEND_MODE"
 FRONTEND_DEV_URL_ENV = "BGPX_FRONTEND_DEV_URL"
-DEFAULT_FRONTEND_DEV_URL = "http://localhost:5173"
+DEFAULT_FRONTEND_DEV_URL = "https://localhost:5173"
 FRONTEND_STARTUP_TIMEOUT_SECONDS = 30.0
 
 
@@ -44,7 +44,7 @@ def _extract_host_port(url: str) -> tuple[str, int]:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError(
-            f"Invalid frontend dev URL '{url}'. Expected format like http://localhost:5173"
+            f"Invalid frontend dev URL '{url}'. Expected format like https://localhost:5173"
         )
 
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -231,6 +231,7 @@ def main() -> None:
     """Run the backend with Uvicorn over HTTPS."""
     args = parse_args()
     frontend_process: subprocess.Popen | None = None
+    ssl_files = ensure_ssl_files()
 
     if args.dev:
         os.environ[FRONTEND_MODE_ENV] = "dev"
@@ -240,7 +241,6 @@ def main() -> None:
         frontend_dir = backend_dir.parent / "frontend"
         frontend_process = _start_frontend_dev_server(args.frontend_dev_url, frontend_dir)
 
-    ssl_files = ensure_ssl_files()
     backend_dir = Path(__file__).resolve().parent
     host = os.getenv("BGPX_HOST", "0.0.0.0")
     port = int(os.getenv("BGPX_PORT", "443"))

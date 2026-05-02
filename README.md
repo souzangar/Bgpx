@@ -153,7 +153,7 @@ python3 main.py --dev
 In this mode, backend:
 - sets frontend mode to dev,
 - auto-starts Vite if not already running,
-- redirects non-API routes to the frontend dev URL (default `http://localhost:5173`).
+- redirects non-API routes to the frontend dev URL (default `https://localhost:5173`).
 
 ---
 
@@ -164,7 +164,7 @@ In this mode, backend:
 - `BGPX_HOST` (default: `0.0.0.0`)
 - `BGPX_PORT` (default: `443`)
 - `BGPX_FRONTEND_MODE` (`dist` or `dev`, default: `dist`)
-- `BGPX_FRONTEND_DEV_URL` (default: `http://localhost:5173`)
+- `BGPX_FRONTEND_DEV_URL` (default: `https://localhost:5173`)
 
 ### Test-related environment variables
 

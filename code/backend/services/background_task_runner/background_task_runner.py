@@ -138,21 +138,17 @@ class BackgroundTaskRunner:
 
                     interval_seconds = state.task_definition.interval_seconds
 
-                await self._schedule_task_run_if_possible(task_id)
+                self._schedule_task_run_if_possible(task_id)
                 await asyncio.sleep(interval_seconds)
-        except asyncio.CancelledError:
-            raise
         finally:
             with self._state_lock:
                 state = self._registry.get(task_id)
-                if state is None:
-                    return
+                if state is not None:
+                    current_task = asyncio.current_task()
+                    if state.loop_handle is current_task:
+                        state.loop_handle = None
 
-                current_task = asyncio.current_task()
-                if state.loop_handle is current_task:
-                    state.loop_handle = None
-
-    async def _schedule_task_run_if_possible(self, task_id: str) -> None:
+    def _schedule_task_run_if_possible(self, task_id: str) -> None:
         """Schedule one task run while enforcing overlap policy."""
         with self._state_lock:
             state = self._registry.get(task_id)
@@ -214,39 +210,35 @@ class BackgroundTaskRunner:
         finally:
             with self._state_lock:
                 state = self._registry.get(task_id)
-                if state is None:
-                    return
+                if state is not None:
+                    if state.run_handle is asyncio.current_task():
+                        state.run_handle = None
 
-                if state.run_handle is asyncio.current_task():
-                    state.run_handle = None
+                    state.run_in_progress = False
 
-                state.run_in_progress = False
-
-                if was_cancelled:
-                    return
-
-                if succeeded:
-                    state.status = replace(
-                        state.status,
-                        last_run_succeeded_at=datetime.now(UTC),
-                        last_error_message=None,
-                        consecutive_failure_count=0,
-                    )
-                    state.next_eligible_run_at_monotonic = 0.0
-                elif error_message is not None:
-                    next_failure_count = state.status.consecutive_failure_count + 1
-                    backoff_delay_seconds = self._compute_backoff_delay_seconds(
-                        state.task_definition,
-                        next_failure_count,
-                    )
-                    state.next_eligible_run_at_monotonic = (
-                        time.monotonic() + backoff_delay_seconds
-                    )
-                    state.status = replace(
-                        state.status,
-                        last_error_message=error_message,
-                        consecutive_failure_count=next_failure_count,
-                    )
+                    if not was_cancelled:
+                        if succeeded:
+                            state.status = replace(
+                                state.status,
+                                last_run_succeeded_at=datetime.now(UTC),
+                                last_error_message=None,
+                                consecutive_failure_count=0,
+                            )
+                            state.next_eligible_run_at_monotonic = 0.0
+                        elif error_message is not None:
+                            next_failure_count = state.status.consecutive_failure_count + 1
+                            backoff_delay_seconds = self._compute_backoff_delay_seconds(
+                                state.task_definition,
+                                next_failure_count,
+                            )
+                            state.next_eligible_run_at_monotonic = (
+                                time.monotonic() + backoff_delay_seconds
+                            )
+                            state.status = replace(
+                                state.status,
+                                last_error_message=error_message,
+                                consecutive_failure_count=next_failure_count,
+                            )
 
     def start_background_task_runner(self) -> None:
         """Start runner lifecycle idempotently."""

@@ -92,6 +92,7 @@ def test_start_background_task_requires_runner_started() -> None:
     async def _scenario() -> None:
         runner = BackgroundTaskRunner()
         runner.register_background_task(_build_task("runner-not-started", lambda: None))
+        await asyncio.sleep(0)
 
         with pytest.raises(RuntimeError, match="not started"):
             runner.start_background_task("runner-not-started")
