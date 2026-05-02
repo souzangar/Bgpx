@@ -51,7 +51,11 @@ code/backend/services/
 
   background_task_runner/
     background_task_runner.py
-    task_contracts.py              # optional protocols/interfaces
+
+code/backend/models/
+  background_task_runner/
+    background_task_runner_models.py
+    __init__.py
 ```
 
 Boundary rule:

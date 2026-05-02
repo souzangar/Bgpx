@@ -1,6 +1,6 @@
-"""Shared backend models package."""
+"""Background task runner shared models."""
 
-from .background_task_runner import (
+from .background_task_runner_models import (
     AsyncTaskCallable,
     BackgroundTaskDefinition,
     BackgroundTaskStatus,
@@ -9,18 +9,13 @@ from .background_task_runner import (
     SyncTaskCallable,
     TaskCallable,
 )
-from .ping import PingResultModel
-from .traceroute import TracerouteHopModel, TracerouteResultModel
 
 __all__ = [
     "AsyncTaskCallable",
     "BackgroundTaskDefinition",
     "BackgroundTaskStatus",
     "OverlapPolicy",
-    "PingResultModel",
     "RetryBackoffConfig",
     "SyncTaskCallable",
     "TaskCallable",
-    "TracerouteHopModel",
-    "TracerouteResultModel",
 ]

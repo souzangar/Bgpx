@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 import socket
@@ -16,6 +17,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from api import router as api_router
+from services.background_task_runner import get_background_task_runner
 from services.sslCert_service import ensure_ssl_files
 
 
@@ -155,9 +157,21 @@ def _start_frontend_dev_server(frontend_dev_url: str, frontend_dir: Path) -> sub
     return process
 
 
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    """Manage process-local shared services bound to FastAPI lifecycle."""
+    runner = get_background_task_runner()
+    runner.start_background_task_runner()
+
+    try:
+        yield
+    finally:
+        runner.stop_background_task_runner()
+
+
 def create_app(frontend_mode: str | None = None, frontend_dev_url: str | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
-    app = FastAPI(title="BGPX Backend", version="0.1.0")
+    app = FastAPI(title="BGPX Backend", version="0.1.0", lifespan=_app_lifespan)
     app.include_router(api_router, prefix="/api")
 
     backend_dir = Path(__file__).resolve().parent
