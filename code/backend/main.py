@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api import router as api_router
 from services.background_task_runner import get_background_task_runner
-from services.sslCert_service import ensure_ssl_files
+from services.sslCert import ensure_ssl_files
 
 
 FRONTEND_MODE_ENV = "BGPX_FRONTEND_MODE"
