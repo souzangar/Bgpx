@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 import logging
 import os
 import time
-from typing import Any, Callable, Protocol
+from collections.abc import Iterator
+from typing import Any, Callable, Protocol, cast
 
 from infra.ip_geolocation import (
     DATASET_PATH,
@@ -55,6 +56,7 @@ class IpGeolocationDataRefresher:
         debounce_seconds: float = 0.5,
         stat_func: Callable[[str | os.PathLike[str]], Any] = os.stat,
         sleep_func: Callable[[float], None] = time.sleep,
+        publish_chunk_size: int = 50_000,
     ) -> None:
         self._publish_snapshot = publish_snapshot
         self._adapter = adapter or IpGeolocationIpinfoJsonFileReaderAdapter()
@@ -62,6 +64,7 @@ class IpGeolocationDataRefresher:
         self._debounce_seconds = debounce_seconds
         self._stat_func = stat_func
         self._sleep_func = sleep_func
+        self._publish_chunk_size = publish_chunk_size
         self._verbose = _is_verbose_enabled()
 
         self._last_fingerprint: SourceFingerprint | None = None
@@ -105,13 +108,31 @@ class IpGeolocationDataRefresher:
             )
 
         try:
-            read_result = self._adapter.read_records()
-            metadata = {
-                "source_fingerprint": next_fingerprint,
-                "total_lines": read_result.total_lines,
-                "malformed_lines": read_result.malformed_lines,
-            }
-            self._publish_snapshot(read_result, metadata)
+            last_read_result: IpGeolocationReadResult | None = None
+
+            iter_reader = getattr(self._adapter, "iter_read_results", None)
+            if callable(iter_reader):
+                chunk_results = cast(Iterator[IpGeolocationReadResult], iter_reader(chunk_size=self._publish_chunk_size))
+                for partial_result in chunk_results:
+                    metadata = {
+                        "source_fingerprint": next_fingerprint,
+                        "total_lines": partial_result.total_lines,
+                        "malformed_lines": partial_result.malformed_lines,
+                    }
+                    self._publish_snapshot(partial_result, metadata)
+                    last_read_result = partial_result
+            else:
+                read_result = self._adapter.read_records()
+                metadata = {
+                    "source_fingerprint": next_fingerprint,
+                    "total_lines": read_result.total_lines,
+                    "malformed_lines": read_result.malformed_lines,
+                }
+                self._publish_snapshot(read_result, metadata)
+                last_read_result = read_result
+
+            if last_read_result is None:
+                return
 
             self._last_fingerprint = next_fingerprint
             self.last_refresh_error = None
@@ -121,8 +142,8 @@ class IpGeolocationDataRefresher:
                 logger.info(
                     "IP geolocation snapshot refresh succeeded "
                     "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                    read_result.total_lines,
-                    read_result.malformed_lines,
+                    last_read_result.total_lines,
+                    last_read_result.malformed_lines,
                     self.refresh_success_count,
                 )
         except Exception as exc:

@@ -23,6 +23,19 @@ class _FakeAdapter:
         return self._result
 
 
+class _ChunkedFakeAdapter:
+    def __init__(self, chunks: list[IpGeolocationReadResult]) -> None:
+        self._chunks = chunks
+
+    def read_records(self) -> IpGeolocationReadResult:
+        return self._chunks[-1]
+
+    def iter_read_results(self, chunk_size: int = 50_000):
+        _ = chunk_size
+        for chunk in self._chunks:
+            yield chunk
+
+
 class _FailingAdapter:
     def read_records(self) -> IpGeolocationReadResult:
         raise RuntimeError("parse failed")
@@ -155,3 +168,30 @@ def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) ->
 
     assert len(published) == 1
     assert caplog.records == []
+
+
+def test_refresher_progressively_publishes_chunked_results() -> None:
+    """Chunk-capable adapter should publish progressively during refresh."""
+    published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
+
+    chunks = [
+        IpGeolocationReadResult(records=[], total_lines=2, malformed_lines=0),
+        IpGeolocationReadResult(records=[], total_lines=4, malformed_lines=1),
+    ]
+
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda result, metadata: published.append((result, metadata)),
+        adapter=_ChunkedFakeAdapter(chunks),
+        stat_func=lambda _path: _FakeStat(10, 1000),
+        sleep_func=lambda _seconds: None,
+        publish_chunk_size=2,
+    )
+
+    refresher.run_once()
+
+    assert len(published) == 2
+    assert published[0][0].total_lines == 2
+    assert published[1][0].total_lines == 4
+    assert published[1][1]["malformed_lines"] == 1
+    assert refresher.refresh_attempt_count == 1
+    assert refresher.refresh_success_count == 1

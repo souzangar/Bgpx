@@ -48,3 +48,4 @@ node_modules/
 *.swp
 ip-geo-sample.json
 code/backend/data/ip_geolocation/ipinfo-geo.json
+code/backend/data/ip_geolocation/ipinfo-geo.json.gz

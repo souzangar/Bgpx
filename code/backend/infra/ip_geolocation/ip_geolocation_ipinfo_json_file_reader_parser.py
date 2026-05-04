@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import json
 from dataclasses import dataclass
+from typing import Iterable
 
 from models.ip_geolocation import IpGeolocationRecordModel
 
@@ -17,7 +18,7 @@ class IpGeolocationParseOutput:
     malformed_count: int
 
 
-def parse_ipinfo_ndjson_lines(lines: list[str]) -> IpGeolocationParseOutput:
+def parse_ipinfo_ndjson_lines(lines: Iterable[str]) -> IpGeolocationParseOutput:
     """Parse NDJSON lines into normalized geolocation records."""
     records: list[IpGeolocationRecordModel] = []
     malformed_count = 0

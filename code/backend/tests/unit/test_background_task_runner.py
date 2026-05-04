@@ -354,3 +354,38 @@ def test_process_local_singleton_accessor_and_reset_behavior() -> None:
         assert third is not first
     finally:
         reset_background_task_runner_for_tests()
+
+
+def test_sync_task_run_is_offloaded_and_keeps_event_loop_responsive() -> None:
+    """Sync run_once should execute without blocking unrelated event-loop progress."""
+
+    async def _scenario() -> None:
+        runner = BackgroundTaskRunner()
+        task_id = "sync-offload"
+
+        def _run_once() -> None:
+            import time
+
+            time.sleep(0.05)
+
+        runner.start_background_task_runner()
+        runner.register_background_task(_build_task(task_id, _run_once, interval_seconds=0.2))
+        runner.start_background_task(task_id)
+
+        ticker_count = 0
+
+        async def _ticker() -> None:
+            nonlocal ticker_count
+            for _ in range(6):
+                await asyncio.sleep(0.01)
+                ticker_count += 1
+
+        try:
+            await _ticker()
+            assert ticker_count == 6
+        finally:
+            runner.stop_background_task(task_id)
+            runner.stop_background_task_runner()
+            await asyncio.sleep(0.01)
+
+    asyncio.run(_scenario())

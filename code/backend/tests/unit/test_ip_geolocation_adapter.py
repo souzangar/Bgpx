@@ -47,3 +47,44 @@ def test_ip_geolocation_adapter_reads_and_parses_ndjson_file(tmp_path: Path) -> 
     assert len(result.records) == 2
     assert result.records[0].network == "1.1.1.0/24"
     assert result.records[1].network == "8.8.8.8/32"
+
+
+def test_ip_geolocation_adapter_iter_read_results_streams_cumulative_chunks(tmp_path: Path) -> None:
+    """Chunk iterator should yield cumulative snapshots for progressive publish flows."""
+    data_file = tmp_path / "ipinfo-geo.json"
+    data_file.write_text(
+        "\n".join(
+            [
+                '{"network":"1.1.1.0/24","country":"Australia","country_code":"AU","continent":"Oceania","continent_code":"OC","asn":"AS13335","as_name":"Cloudflare, Inc.","as_domain":"cloudflare.com"}',
+                '{"network":"8.8.8.8","country":"United States","country_code":"US","continent":"North America","continent_code":"NA","asn":"AS15169","as_name":"Google LLC","as_domain":"google.com"}',
+                "{bad-json-line}",
+                '{"network":"9.9.9.0/24","country":"United States","country_code":"US","continent":"North America","continent_code":"NA","asn":"AS19281","as_name":"Quad9","as_domain":"quad9.net"}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    adapter = IpGeolocationIpinfoJsonFileReaderAdapter()
+    adapter_module = __import__(
+        "infra.ip_geolocation.ip_geolocation_ipinfo_json_file_reader_adapter",
+        fromlist=["DATASET_PATH"],
+    )
+    original_path = adapter_module.DATASET_PATH
+    adapter_module.DATASET_PATH = data_file
+
+    try:
+        chunks = list(adapter.iter_read_results(chunk_size=2))
+    finally:
+        adapter_module.DATASET_PATH = original_path
+
+    assert len(chunks) == 2
+
+    first = chunks[0]
+    assert first.total_lines == 2
+    assert first.malformed_lines == 0
+    assert len(first.records) == 2
+
+    second = chunks[1]
+    assert second.total_lines == 4
+    assert second.malformed_lines == 1
+    assert len(second.records) == 3

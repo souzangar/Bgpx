@@ -198,9 +198,10 @@ class BackgroundTaskRunner:
         was_cancelled = False
 
         try:
-            result = run_callable()
-            if inspect.isawaitable(result):
-                await result
+            if inspect.iscoroutinefunction(run_callable):
+                await run_callable()
+            else:
+                await asyncio.to_thread(run_callable)
             succeeded = True
         except asyncio.CancelledError:
             was_cancelled = True
