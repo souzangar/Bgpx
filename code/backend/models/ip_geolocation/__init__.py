@@ -1,15 +1,6 @@
-"""Shared backend models package."""
+"""IP geolocation feature shared models."""
 
-from .background_task_runner import (
-    AsyncTaskCallable,
-    BackgroundTaskDefinition,
-    BackgroundTaskStatus,
-    OverlapPolicy,
-    RetryBackoffConfig,
-    SyncTaskCallable,
-    TaskCallable,
-)
-from .ip_geolocation import (
+from .ip_geolocation_models import (
     EnvelopeStatus,
     IpGeolocationErrorModel,
     IpGeolocationLoadCountersModel,
@@ -24,14 +15,9 @@ from .ip_geolocation import (
     ResolutionState,
     ServiceState,
 )
-from .ping import PingResultModel
-from .traceroute import TracerouteHopModel, TracerouteResultModel
 
 __all__ = [
-    "AsyncTaskCallable",
     "EnvelopeStatus",
-    "BackgroundTaskDefinition",
-    "BackgroundTaskStatus",
     "IpGeolocationErrorModel",
     "IpGeolocationLoadCountersModel",
     "IpGeolocationLoadStatusModel",
@@ -42,13 +28,6 @@ __all__ = [
     "IpGeolocationRecordModel",
     "IpGeolocationRefreshMetadataModel",
     "IpGeolocationSourceFingerprintModel",
-    "OverlapPolicy",
-    "PingResultModel",
     "ResolutionState",
-    "RetryBackoffConfig",
     "ServiceState",
-    "SyncTaskCallable",
-    "TaskCallable",
-    "TracerouteHopModel",
-    "TracerouteResultModel",
 ]

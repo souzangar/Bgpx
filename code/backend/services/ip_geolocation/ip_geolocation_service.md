@@ -3,15 +3,15 @@
 This document defines the design and implementation plan for the backend IP geolocation service layer.
 
 Location target:
-- Service doc: `code/backend/services/ip_geolocation_service.md`
-- Current service module: `code/backend/services/ip_geolocation_service.py`
+- Service doc: `code/backend/services/ip_geolocation/ip_geolocation_service.md`
+- Current service module: `code/backend/services/ip_geolocation/ip_geolocation_service.py`
 - Planned modular service packages:
   - `code/backend/services/ip_geolocation/ip_geolocation_service.py`
   - `code/backend/services/ip_geolocation/ip_geolocation_data_refresher.py`
   - `code/backend/services/background_task_runner/background_task_runner.py`
 
 Related service docs:
-- `code/backend/services/background_task_runner_service.md` (generic runner lifecycle/scheduling contract)
+- `code/backend/services/background_task_runner/background_task_runner_service.md` (generic runner lifecycle/scheduling contract)
 
 ---
 
@@ -186,6 +186,24 @@ Method naming examples:
 - `reload_ip_geolocation_dataset()`
 - `start_ip_geolocation_source_watch()`
 - `stop_ip_geolocation_source_watch()`
+
+### 4.2 Pre-implementation alignment decisions (locked for v1)
+
+To avoid churn during implementation, the following decisions are locked for v1:
+
+1. **Envelope field naming**
+   - IP geolocation responses use `status` (`success | failure`) as defined in this document.
+   - Existing endpoints that currently use other field names (e.g. `result`) are left unchanged for now.
+   - Cross-feature naming harmonization can be handled as a separate refactor task.
+
+2. **Lookup strategy for subnet matching**
+   - Initial implementation uses Python `ipaddress` with normalized network objects and deterministic in-memory matching.
+   - Given current dataset size, a straightforward linear scan over immutable snapshot entries is acceptable for v1.
+   - Optimization to indexed/radix structures is deferred and can be introduced behind the same service contract.
+
+3. **Service-first pattern adoption**
+   - IP geolocation will follow full `api -> apps -> services -> infra/models` separation.
+   - Existing thin app patterns in `ping`/`traceroute` do not block this implementation and are not part of this scope.
 
 ### 4.1 DTO ownership and placement rule
 
@@ -468,6 +486,155 @@ Planned methods:
 
 - `stop_ip_geolocation_source_watch() -> None` (optional)
   - unregister/stop IP geolocation refresher task from background task runner
+
+---
+
+## 9.1 Runtime wiring contract in current codebase (`main.py` lifespan)
+
+Current `main.py` already starts/stops `background_task_runner` in FastAPI lifespan.
+IP geolocation integration must extend that existing lifecycle (not replace it):
+
+Startup order (inside lifespan startup):
+1. Resolve shared background runner and start it idempotently.
+2. Construct/resolve `ip_geolocation_service`.
+3. Construct `ip_geolocation_data_refresher` bound to that service.
+4. Register refresher task (recommended id: `ip_geolocation_source_watch`).
+5. Start refresher task.
+
+Shutdown order (inside lifespan shutdown/finally):
+1. Stop refresher task idempotently.
+2. Optionally unregister refresher task.
+3. Stop background runner idempotently.
+
+Constraint:
+- Keep ownership boundaries strict: app/API call only `ip_geolocation_service`; lifecycle owns task registration/start/stop.
+
+---
+
+## 9.2 IP list query by filters contract (v1 locked)
+
+This section defines the contract for listing IP/network records by geo/ASN filters.
+
+### 9.2.1 Purpose
+
+In addition to `lookup_ip_geolocation(ip: str)`, the service must provide a list-query use case:
+
+- `list_ip_geolocations_by_filters(...)`
+
+This use case returns records matching one or more supported filter fields.
+
+### 9.2.2 Supported filter fields (allowlist)
+
+v1 filterable fields:
+
+- `country`
+- `country_code`
+- `continent`
+- `continent_code`
+- `asn`
+- `as_name`
+- `as_domain`
+- `network` (exact normalized network string)
+
+Rule:
+- Any unknown filter key must be rejected with validation error.
+
+### 9.2.3 Matching semantics
+
+v1 matching behavior is deterministic and simple:
+
+1. String filters are exact-match after normalization.
+2. Normalization rules:
+   - trim outer whitespace,
+   - case-insensitive compare for textual fields.
+3. `network` filter compares against canonical normalized network representation.
+4. Null-handling:
+   - records with `null` value for a filtered field do not match non-null filter values,
+   - null-filter queries are not supported in v1.
+
+### 9.2.4 Multi-filter behavior
+
+When multiple filters are provided, use **AND semantics**:
+
+- record must satisfy all provided filters to be included.
+
+Repeated query params for same key:
+- not supported in v1 (reject as validation error to keep contract explicit).
+
+### 9.2.5 Pagination and limits
+
+List query supports offset pagination:
+
+- `limit` (default: `100`)
+- `offset` (default: `0`)
+
+Guardrails:
+
+- maximum `limit`: `1000`
+- negative `offset`/`limit` values are invalid.
+
+### 9.2.6 Response contract for list query
+
+List endpoint payload should keep two-axis service contract consistency:
+
+- envelope `status`: `success | failure`
+- runtime `service_state`: `loading | ready | failed`
+
+On `status = success`, include:
+
+- `data.items`: array of matching records
+- `data.pagination`: `total`, `limit`, `offset`, `has_more`
+
+Recommended shape:
+
+```json
+{
+  "status": "success",
+  "service_state": "ready",
+  "data": {
+    "items": [
+      {
+        "network": "1.0.0.0/24",
+        "country": "Australia",
+        "country_code": "AU",
+        "continent": "Oceania",
+        "continent_code": "OC",
+        "asn": "AS13335",
+        "as_name": "Cloudflare, Inc.",
+        "as_domain": "cloudflare.com"
+      }
+    ],
+    "pagination": {
+      "total": 1,
+      "limit": 100,
+      "offset": 0,
+      "has_more": false
+    }
+  }
+}
+```
+
+### 9.2.7 Loading-state behavior for list query
+
+During `service_state = loading`:
+
+- service may return partial matches from currently loaded snapshot,
+- response remains `status = success`,
+- `service_state` must clearly indicate `loading` so callers know results may be incomplete.
+
+When `service_state = ready`:
+
+- `total` and `items` reflect complete dataset state.
+
+When `service_state = failed`:
+
+- return standard failure envelope (`status = failure`) and no list payload.
+
+### 9.2.8 Performance guidance (v1)
+
+- Current dataset size allows linear scan over immutable snapshot.
+- Secondary field indexes are optional in v1 and can be added later behind same service contract.
+- API layer must enforce limit guardrails to prevent oversized responses.
 
 ---
 
