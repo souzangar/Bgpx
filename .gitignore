@@ -47,3 +47,4 @@ node_modules/
 # Misc
 *.swp
 ip-geo-sample.json
+code/backend/data/ip_geolocation/ipinfo-geo.json

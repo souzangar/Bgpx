@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 import os
 import time
 from typing import Any, Callable, Protocol
@@ -13,6 +14,16 @@ from infra.ip_geolocation import (
     IpGeolocationIpinfoJsonFileReaderAdapter,
     IpGeolocationReadResult,
 )
+
+
+VERBOSE_ENV = "BGPX_VERBOSE"
+_TRUTHY_VALUES = {"1", "true", "yes", "on"}
+logger = logging.getLogger("uvicorn.error")
+
+
+def _is_verbose_enabled() -> bool:
+    """Return whether verbose logging is enabled from runtime environment."""
+    return os.getenv(VERBOSE_ENV, "0").strip().lower() in _TRUTHY_VALUES
 
 
 @dataclass(frozen=True)
@@ -51,6 +62,7 @@ class IpGeolocationDataRefresher:
         self._debounce_seconds = debounce_seconds
         self._stat_func = stat_func
         self._sleep_func = sleep_func
+        self._verbose = _is_verbose_enabled()
 
         self._last_fingerprint: SourceFingerprint | None = None
         self.last_refresh_error: str | None = None
@@ -83,6 +95,15 @@ class IpGeolocationDataRefresher:
         self.refresh_attempt_count += 1
         self.last_refresh_attempt_at = datetime.now(UTC)
 
+        if self._verbose:
+            logger.info(
+                "IP geolocation source change detected; refreshing snapshot "
+                "(path=%s, inode=%s, mtime_ns=%s)",
+                self._source_path,
+                next_fingerprint.inode,
+                next_fingerprint.mtime_ns,
+            )
+
         try:
             read_result = self._adapter.read_records()
             metadata = {
@@ -96,9 +117,23 @@ class IpGeolocationDataRefresher:
             self.last_refresh_error = None
             self.last_refresh_succeeded_at = datetime.now(UTC)
             self.refresh_success_count += 1
+            if self._verbose:
+                logger.info(
+                    "IP geolocation snapshot refresh succeeded "
+                    "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+                    read_result.total_lines,
+                    read_result.malformed_lines,
+                    self.refresh_success_count,
+                )
         except Exception as exc:
             self.last_refresh_error = str(exc) or exc.__class__.__name__
             self.refresh_failure_count += 1
+            if self._verbose:
+                logger.exception(
+                    "IP geolocation snapshot refresh failed (failure_count=%s): %s",
+                    self.refresh_failure_count,
+                    self.last_refresh_error,
+                )
 
     def _read_source_fingerprint(self) -> SourceFingerprint | None:
         """Read source metadata fingerprint for change detection."""

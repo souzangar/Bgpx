@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import sys
 
@@ -104,3 +105,53 @@ def test_refresher_failure_does_not_crash_and_tracks_error() -> None:
     assert refresher.refresh_attempt_count == 1
     assert refresher.refresh_failure_count == 1
     assert refresher.last_refresh_error == "parse failed"
+
+
+def test_refresher_verbose_logs_only_when_refresh_triggered(monkeypatch, caplog) -> None:
+    """Verbose mode should log only when a source change triggers refresh/update."""
+    published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
+    monkeypatch.setenv("BGPX_VERBOSE", "1")
+
+    fingerprints = [
+        _FakeStat(10, 1000),
+        _FakeStat(10, 1000),
+    ]
+
+    def _stat_func(_path: object) -> _FakeStat:
+        return fingerprints.pop(0)
+
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda result, metadata: published.append((result, metadata)),
+        adapter=_FakeAdapter(IpGeolocationReadResult(records=[], total_lines=3, malformed_lines=0)),
+        stat_func=_stat_func,
+        sleep_func=lambda _seconds: None,
+    )
+
+    with caplog.at_level(logging.INFO):
+        refresher.run_once()
+        refresher.run_once()
+
+    assert len(published) == 1
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("source change detected" in message for message in messages)
+    assert any("snapshot refresh succeeded" in message for message in messages)
+    assert len(messages) == 2
+
+
+def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) -> None:
+    """Refresh should not emit verbose logs when verbose mode is disabled."""
+    published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
+    monkeypatch.setenv("BGPX_VERBOSE", "0")
+
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda result, metadata: published.append((result, metadata)),
+        adapter=_FakeAdapter(IpGeolocationReadResult(records=[], total_lines=2, malformed_lines=0)),
+        stat_func=lambda _path: _FakeStat(99, 1234),
+        sleep_func=lambda _seconds: None,
+    )
+
+    with caplog.at_level(logging.INFO):
+        refresher.run_once()
+
+    assert len(published) == 1
+    assert caplog.records == []

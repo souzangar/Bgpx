@@ -26,6 +26,7 @@ from services.sslCert import ensure_ssl_files
 
 FRONTEND_MODE_ENV = "BGPX_FRONTEND_MODE"
 FRONTEND_DEV_URL_ENV = "BGPX_FRONTEND_DEV_URL"
+VERBOSE_ENV = "BGPX_VERBOSE"
 DEFAULT_FRONTEND_DEV_URL = "https://localhost:5173"
 FRONTEND_STARTUP_TIMEOUT_SECONDS = 30.0
 IP_GEO_REFRESH_TASK_ID = "ip_geolocation_source_watch"
@@ -259,6 +260,11 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv(FRONTEND_DEV_URL_ENV, DEFAULT_FRONTEND_DEV_URL),
         help=f"Frontend dev server URL used with -dev (default: {DEFAULT_FRONTEND_DEV_URL}).",
     )
+    parser.add_argument(
+        "-verbose",
+        action="store_true",
+        help="Enable verbose backend logging (includes Uvicorn access logs).",
+    )
     return parser.parse_args()
 
 
@@ -267,6 +273,7 @@ def main() -> None:
     args = parse_args()
     frontend_process: subprocess.Popen | None = None
     ssl_files = ensure_ssl_files()
+    os.environ[VERBOSE_ENV] = "1" if args.verbose else "0"
 
     if args.dev:
         os.environ[FRONTEND_MODE_ENV] = "dev"
@@ -290,6 +297,7 @@ def main() -> None:
             ssl_keyfile=str(ssl_files.key_file),
             reload=True,
             reload_dirs=[str(backend_dir)],
+            access_log=args.verbose,
         )
     finally:
         _stop_subprocess(frontend_process)
