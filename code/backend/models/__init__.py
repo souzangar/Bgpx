@@ -1,5 +1,11 @@
 """Shared backend models package."""
 
+from .admin_token_auth import (
+    AdminAuthErrorModel,
+    AdminTokenAuthConfigStateModel,
+    AdminTokenValidationReason,
+    AdminTokenValidationResultModel,
+)
 from .background_task_runner import (
     AsyncTaskCallable,
     BackgroundTaskDefinition,
@@ -28,6 +34,10 @@ from .ping import PingResultModel
 from .traceroute import TracerouteHopModel, TracerouteResultModel
 
 __all__ = [
+    "AdminAuthErrorModel",
+    "AdminTokenAuthConfigStateModel",
+    "AdminTokenValidationReason",
+    "AdminTokenValidationResultModel",
     "AsyncTaskCallable",
     "EnvelopeStatus",
     "BackgroundTaskDefinition",
