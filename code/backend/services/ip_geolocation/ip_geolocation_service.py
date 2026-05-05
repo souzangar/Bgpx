@@ -97,6 +97,71 @@ class IpGeolocationService:
             self._refresh = next_refresh
             self._service_state = "ready" if is_final_chunk else "loading"
 
+    def apply_snapshot_delta(self, candidate: IpGeolocationReadResult, metadata: dict[str, Any]) -> bool:
+        """Apply row-level add/remove/update changes for ready snapshots.
+
+        Returns False when delta apply cannot be safely used (e.g. service is not
+        ready yet), so caller can fallback to full publish.
+        """
+        with self._lock:
+            if self._service_state != "ready":
+                return False
+
+            current_by_network = {entry.record.network: entry for entry in self._snapshot}
+
+        incoming_by_network = {record.network: record for record in candidate.records}
+
+        current_networks = set(current_by_network)
+        incoming_networks = set(incoming_by_network)
+
+        removed_networks = current_networks - incoming_networks
+        added_networks = incoming_networks - current_networks
+        common_networks = current_networks & incoming_networks
+
+        updated_networks = {
+            network
+            for network in common_networks
+            if self._record_key(current_by_network[network].record) != self._record_key(incoming_by_network[network])
+        }
+
+        if not removed_networks and not added_networks and not updated_networks:
+            return True
+
+        next_by_network = dict(current_by_network)
+        for network in removed_networks:
+            next_by_network.pop(network, None)
+
+        for network in added_networks | updated_networks:
+            record = incoming_by_network[network]
+            parsed_network = ipaddress.ip_network(record.network, strict=False)
+            next_by_network[network] = _SnapshotEntry(network=parsed_network, record=record)
+
+        fingerprint = self._extract_fingerprint_model(metadata.get("source_fingerprint"))
+        next_refresh = IpGeolocationRefreshMetadataModel(
+            last_refresh_error=None,
+            last_refresh_attempt_at=self._resolve_datetime(metadata.get("last_refresh_attempt_at"))
+            or self._refresh.last_refresh_attempt_at,
+            last_refresh_succeeded_at=self._resolve_datetime(metadata.get("last_refresh_succeeded_at"))
+            or datetime.now(UTC),
+            active_source_fingerprint=fingerprint,
+            refresh_attempt_count=self._resolve_int(metadata.get("refresh_attempt_count"), self._refresh.refresh_attempt_count),
+            refresh_success_count=self._resolve_int(metadata.get("refresh_success_count"), self._refresh.refresh_success_count),
+            refresh_failure_count=self._resolve_int(metadata.get("refresh_failure_count"), self._refresh.refresh_failure_count),
+        )
+
+        with self._lock:
+            self._snapshot = tuple(next_by_network.values())
+            self._counters = IpGeolocationLoadCountersModel(
+                total=self._resolve_int(metadata.get("total_lines"), candidate.total_lines),
+                loaded=len(self._snapshot),
+                malformed=self._resolve_int(metadata.get("malformed_lines"), candidate.malformed_lines),
+            )
+            self._last_loaded_at = datetime.now(UTC)
+            self._refresh = next_refresh
+            self._service_state = "ready"
+
+        return True
+
     def is_snapshot_equivalent(self, candidate: IpGeolocationReadResult) -> bool:
         """Return True when candidate records semantically match active in-memory snapshot."""
         with self._lock:

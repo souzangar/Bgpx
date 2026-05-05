@@ -11,7 +11,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from infra.ip_geolocation import IpGeolocationReadResult
-from models.ip_geolocation import IpGeolocationLookupFailureResponseModel
+from models.ip_geolocation import IpGeolocationLookupFailureResponseModel, IpGeolocationLookupSuccessResponseModel, IpGeolocationRecordModel
 from services.ip_geolocation import IpGeolocationService
 from services.ip_geolocation.ip_geolocation_data_refresher import SourceFingerprint
 
@@ -34,6 +34,19 @@ def _sample_read_result() -> IpGeolocationReadResult:
         ],
         total_lines=2,
         malformed_lines=1,
+    )
+
+
+def _record(network: str, as_name: str) -> IpGeolocationRecordModel:
+    return IpGeolocationRecordModel(
+        network=network,
+        country="United States",
+        country_code="US",
+        continent="North America",
+        continent_code="NA",
+        asn="AS15169",
+        as_name=as_name,
+        as_domain="google.com",
     )
 
 
@@ -205,3 +218,67 @@ def test_is_snapshot_equivalent_returns_false_for_different_content() -> None:
     candidate = IpGeolocationReadResult(records=[changed], total_lines=2, malformed_lines=1)
 
     assert service.is_snapshot_equivalent(candidate) is False
+
+
+def test_apply_snapshot_delta_returns_false_when_not_ready() -> None:
+    """Delta apply should be rejected before service reaches ready state."""
+    service = IpGeolocationService()
+    candidate = IpGeolocationReadResult(records=[_record("8.8.8.0/24", "Google LLC")], total_lines=1, malformed_lines=0)
+
+    assert service.apply_snapshot_delta(candidate, {}) is False
+
+
+def test_apply_snapshot_delta_add_remove_update_changes_snapshot() -> None:
+    """Delta apply should add, remove and update rows in-place for ready snapshots."""
+    service = IpGeolocationService()
+
+    baseline = IpGeolocationReadResult(
+        records=[
+            _record("8.8.8.0/24", "Google LLC"),
+            _record("9.9.9.0/24", "Quad9"),
+        ],
+        total_lines=2,
+        malformed_lines=0,
+    )
+    service.publish_snapshot(baseline, {})
+
+    candidate = IpGeolocationReadResult(
+        records=[
+            _record("8.8.8.0/24", "Google Updated"),
+            _record("1.1.1.0/24", "Cloudflare"),
+        ],
+        total_lines=2,
+        malformed_lines=0,
+    )
+
+    applied = service.apply_snapshot_delta(candidate, {})
+    assert applied is True
+
+    found_google = service.lookup_ip_geolocation("8.8.8.8")
+    assert isinstance(found_google, IpGeolocationLookupSuccessResponseModel)
+    assert found_google.resolution_state == "found"
+    assert found_google.data.as_name == "Google Updated"
+
+    found_added = service.lookup_ip_geolocation("1.1.1.1")
+    assert isinstance(found_added, IpGeolocationLookupSuccessResponseModel)
+    assert found_added.resolution_state == "found"
+    assert found_added.data.as_name == "Cloudflare"
+
+    removed = service.lookup_ip_geolocation("9.9.9.9")
+    assert isinstance(removed, IpGeolocationLookupSuccessResponseModel)
+    assert removed.resolution_state == "not_found"
+
+
+def test_apply_snapshot_delta_noop_keeps_snapshot_and_returns_true() -> None:
+    """Equivalent candidate should return True without changing semantics."""
+    service = IpGeolocationService()
+    baseline = IpGeolocationReadResult(records=[_record("8.8.8.0/24", "Google LLC")], total_lines=1, malformed_lines=0)
+    service.publish_snapshot(baseline, {})
+
+    candidate = IpGeolocationReadResult(records=[_record("8.8.8.0/24", "Google LLC")], total_lines=1, malformed_lines=0)
+    assert service.apply_snapshot_delta(candidate, {}) is True
+
+    payload = service.lookup_ip_geolocation("8.8.8.8")
+    assert isinstance(payload, IpGeolocationLookupSuccessResponseModel)
+    assert payload.resolution_state == "found"
+    assert payload.data.as_name == "Google LLC"
