@@ -49,6 +49,10 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             response = client.get("/api/health")
             assert response.status_code == 200
 
+            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            assert gz_watch_status.task_id == "ip_geolocation_ipinfo_gz_downloader"
+            assert gz_watch_status.is_running is True
+
             status = runner.get_background_task_status("ip_geolocation_source_watch")
             assert status.task_id == "ip_geolocation_source_watch"
             assert status.is_running is True
@@ -57,11 +61,17 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             response = client.get("/api/health")
             assert response.status_code == 200
 
+            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            assert gz_watch_status.is_running is True
+
             status = runner.get_background_task_status("ip_geolocation_source_watch")
             assert status.is_running is True
 
         with TestClient(app):
             pass
+
+        with pytest.raises(KeyError):
+            runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
 
         with pytest.raises(KeyError):
             runner.get_background_task_status("ip_geolocation_source_watch")
