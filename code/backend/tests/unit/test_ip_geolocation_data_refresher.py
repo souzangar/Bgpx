@@ -18,8 +18,10 @@ from services.ip_geolocation.ip_geolocation_data_refresher import IpGeolocationD
 class _FakeAdapter:
     def __init__(self, result: IpGeolocationReadResult) -> None:
         self._result = result
+        self.read_count = 0
 
     def read_records(self) -> IpGeolocationReadResult:
+        self.read_count += 1
         return self._result
 
 
@@ -225,3 +227,34 @@ def test_refresher_progressively_publishes_chunked_results() -> None:
     assert published[1][1]["malformed_lines"] == 1
     assert refresher.refresh_attempt_count == 1
     assert refresher.refresh_success_count == 1
+
+
+def test_refresher_skips_publish_when_fingerprint_changes_but_content_equivalent() -> None:
+    """Changed fingerprint with equivalent content should skip publish and mark success."""
+    published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
+
+    fingerprints = [
+        _FakeStat(10, 1000),
+        _FakeStat(11, 2000),
+        _FakeStat(11, 2000),
+    ]
+
+    def _stat_func(_path: object) -> _FakeStat:
+        return fingerprints.pop(0)
+
+    adapter = _FakeAdapter(IpGeolocationReadResult(records=[], total_lines=5, malformed_lines=0))
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda result, metadata: published.append((result, metadata)),
+        is_snapshot_equivalent=lambda _candidate: True,
+        adapter=adapter,
+        stat_func=_stat_func,
+        sleep_func=lambda _seconds: None,
+    )
+
+    refresher.run_once()
+    refresher.run_once()
+
+    assert len(published) == 1
+    assert refresher.refresh_attempt_count == 2
+    assert refresher.refresh_success_count == 2
+    assert adapter.read_count == 2

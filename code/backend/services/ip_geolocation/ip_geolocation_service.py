@@ -97,6 +97,20 @@ class IpGeolocationService:
             self._refresh = next_refresh
             self._service_state = "ready" if is_final_chunk else "loading"
 
+    def is_snapshot_equivalent(self, candidate: IpGeolocationReadResult) -> bool:
+        """Return True when candidate records semantically match active in-memory snapshot."""
+        with self._lock:
+            if self._service_state != "ready":
+                return False
+            current_snapshot = self._snapshot
+
+        if len(current_snapshot) != len(candidate.records):
+            return False
+
+        current_keys = {self._record_key(entry.record) for entry in current_snapshot}
+        candidate_keys = {self._record_key(record) for record in candidate.records}
+        return current_keys == candidate_keys
+
     def lookup_ip_geolocation(self, ip: str) -> IpGeolocationLookupResponseModel:
         """Resolve a requested IP against the active in-memory snapshot."""
         with self._lock:
@@ -230,6 +244,19 @@ class IpGeolocationService:
             return None
 
         return IpGeolocationSourceFingerprintModel(inode=inode_value, mtime_ns=mtime_value)
+
+    @staticmethod
+    def _record_key(record: IpGeolocationRecordModel) -> tuple[str, str, str, str, str, str | None, str | None, str | None]:
+        return (
+            record.network,
+            record.country,
+            record.country_code,
+            record.continent,
+            record.continent_code,
+            record.asn,
+            record.as_name,
+            record.as_domain,
+        )
 
 
 __all__ = ["IpGeolocationService"]

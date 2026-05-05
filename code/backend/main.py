@@ -177,6 +177,7 @@ async def _app_lifespan(_app: FastAPI):
     ip_geolocation_downloader = IpGeolocationDataDownloader()
     ip_geolocation_refresher = IpGeolocationDataRefresher(
         publish_snapshot=ip_geolocation_service.publish_snapshot,
+        is_snapshot_equivalent=ip_geolocation_service.is_snapshot_equivalent,
     )
 
     ip_geo_ipinfo_gz_downloader_task = BackgroundTaskDefinition(

@@ -160,3 +160,48 @@ def test_failed_state_returns_failure_envelope() -> None:
     assert payload.status == "failure"
     assert payload.service_state == "failed"
     assert payload.error.code == "IP_GEO_SERVICE_FAILED"
+
+
+def test_is_snapshot_equivalent_returns_false_when_service_not_ready() -> None:
+    """Equivalence check should be disabled before first successful final publish."""
+    service = IpGeolocationService()
+    assert service.is_snapshot_equivalent(_sample_read_result()) is False
+
+
+def test_is_snapshot_equivalent_returns_true_for_same_content_different_order() -> None:
+    """Equivalence should be semantic and order-insensitive."""
+    service = IpGeolocationService()
+    baseline = _sample_read_result()
+    service.publish_snapshot(baseline, {})
+
+    reversed_records = list(reversed(baseline.records))
+    candidate = IpGeolocationReadResult(
+        records=reversed_records,
+        total_lines=baseline.total_lines,
+        malformed_lines=baseline.malformed_lines,
+    )
+
+    assert service.is_snapshot_equivalent(candidate) is True
+
+
+def test_is_snapshot_equivalent_returns_false_for_different_content() -> None:
+    """Any record-field difference should break equivalence."""
+    service = IpGeolocationService()
+    baseline = _sample_read_result()
+    service.publish_snapshot(baseline, {})
+
+    from models.ip_geolocation import IpGeolocationRecordModel
+
+    changed = IpGeolocationRecordModel(
+        network="8.8.8.0/24",
+        country="United States",
+        country_code="US",
+        continent="North America",
+        continent_code="NA",
+        asn="AS99999",
+        as_name="Changed Corp",
+        as_domain="changed.example",
+    )
+    candidate = IpGeolocationReadResult(records=[changed], total_lines=2, malformed_lines=1)
+
+    assert service.is_snapshot_equivalent(candidate) is False

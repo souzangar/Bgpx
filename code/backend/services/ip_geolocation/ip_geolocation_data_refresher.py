@@ -36,6 +36,7 @@ class SourceFingerprint:
 
 
 PublishSnapshotCallable = Callable[[IpGeolocationReadResult, dict[str, object]], None]
+SnapshotEquivalentCallable = Callable[[IpGeolocationReadResult], bool]
 
 
 class _ReaderAdapterProtocol(Protocol):
@@ -51,6 +52,7 @@ class IpGeolocationDataRefresher:
         self,
         *,
         publish_snapshot: PublishSnapshotCallable,
+        is_snapshot_equivalent: SnapshotEquivalentCallable | None = None,
         adapter: _ReaderAdapterProtocol | None = None,
         source_path: str | os.PathLike[str] = DATASET_PATH,
         debounce_seconds: float = 0.5,
@@ -59,6 +61,7 @@ class IpGeolocationDataRefresher:
         publish_chunk_size: int = 5_000,
     ) -> None:
         self._publish_snapshot = publish_snapshot
+        self._is_snapshot_equivalent = is_snapshot_equivalent
         self._adapter = adapter or IpGeolocationIpinfoJsonFileReaderAdapter()
         self._source_path = source_path
         self._debounce_seconds = debounce_seconds
@@ -109,6 +112,26 @@ class IpGeolocationDataRefresher:
             )
 
         try:
+            read_result = self._adapter.read_records()
+            if (
+                self._is_snapshot_equivalent is not None
+                and self._last_fingerprint is not None
+                and self._is_snapshot_equivalent(read_result)
+            ):
+                self._last_fingerprint = next_fingerprint
+                self.last_refresh_error = None
+                self.last_refresh_succeeded_at = datetime.now(UTC)
+                self.refresh_success_count += 1
+                if self._verbose:
+                    logger.info(
+                        "IP geolocation refresh skipped; source content unchanged "
+                        "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+                        read_result.total_lines,
+                        read_result.malformed_lines,
+                        self.refresh_success_count,
+                    )
+                return
+
             last_read_result: IpGeolocationReadResult | None = None
 
             iter_reader = getattr(self._adapter, "iter_read_results", None)
@@ -142,7 +165,6 @@ class IpGeolocationDataRefresher:
                     last_read_result = current_chunk
                     current_chunk = next_chunk
             else:
-                read_result = self._adapter.read_records()
                 metadata = {
                     "source_fingerprint": next_fingerprint,
                     "total_lines": read_result.total_lines,
@@ -203,5 +225,6 @@ class IpGeolocationDataRefresher:
 __all__ = [
     "IpGeolocationDataRefresher",
     "PublishSnapshotCallable",
+    "SnapshotEquivalentCallable",
     "SourceFingerprint",
 ]
