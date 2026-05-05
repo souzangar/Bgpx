@@ -13,7 +13,7 @@ from .ip_geolocation_ipinfo_json_file_reader_parser import (
 )
 
 
-DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo-geo.json")
+DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json")
 
 
 @dataclass(frozen=True)
@@ -47,23 +47,21 @@ class IpGeolocationIpinfoJsonFileReaderAdapter:
         )
 
     def iter_read_results(self, chunk_size: int = 50_000) -> Iterator[IpGeolocationReadResult]:
-        """Stream-read NDJSON file and yield cumulative parse snapshots per chunk."""
+        """Stream-read NDJSON file and yield per-chunk parse snapshots."""
         if chunk_size <= 0:
             chunk_size = 1
 
         total_lines = 0
         malformed_lines = 0
-        cumulative_records: list[IpGeolocationRecordModel] = []
         buffer: list[str] = []
 
         def _flush() -> IpGeolocationReadResult:
             nonlocal malformed_lines
             parsed = parse_ipinfo_ndjson_lines(buffer)
-            cumulative_records.extend(parsed.records)
             malformed_lines += parsed.malformed_count
             buffer.clear()
             return IpGeolocationReadResult(
-                records=list(cumulative_records),
+                records=parsed.records,
                 total_lines=total_lines,
                 malformed_lines=malformed_lines,
             )

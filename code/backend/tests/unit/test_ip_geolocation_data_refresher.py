@@ -147,8 +147,36 @@ def test_refresher_verbose_logs_only_when_refresh_triggered(monkeypatch, caplog)
     assert len(published) == 1
     messages = [record.getMessage() for record in caplog.records]
     assert any("source change detected" in message for message in messages)
+    assert any("refresh chunk published" in message for message in messages)
     assert any("snapshot refresh succeeded" in message for message in messages)
-    assert len(messages) == 2
+    assert len(messages) == 3
+
+
+def test_refresher_verbose_logs_each_chunk_publish(monkeypatch, caplog) -> None:
+    """Chunked refresh should emit one verbose publish log per chunk."""
+    monkeypatch.setenv("BGPX_VERBOSE", "1")
+    chunks = [
+        IpGeolocationReadResult(records=[], total_lines=2, malformed_lines=0),
+        IpGeolocationReadResult(records=[], total_lines=4, malformed_lines=1),
+    ]
+
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda _result, _metadata: None,
+        adapter=_ChunkedFakeAdapter(chunks),
+        stat_func=lambda _path: _FakeStat(10, 1000),
+        sleep_func=lambda _seconds: None,
+        publish_chunk_size=2,
+    )
+
+    with caplog.at_level(logging.INFO):
+        refresher.run_once()
+
+    chunk_messages = [record.getMessage() for record in caplog.records if "refresh chunk published" in record.getMessage()]
+    assert len(chunk_messages) == 2
+    assert "chunk=1" in chunk_messages[0]
+    assert "is_final_chunk=False" in chunk_messages[0]
+    assert "chunk=2" in chunk_messages[1]
+    assert "is_final_chunk=True" in chunk_messages[1]
 
 
 def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) -> None:
@@ -192,6 +220,8 @@ def test_refresher_progressively_publishes_chunked_results() -> None:
     assert len(published) == 2
     assert published[0][0].total_lines == 2
     assert published[1][0].total_lines == 4
+    assert published[0][1]["is_final_chunk"] is False
+    assert published[1][1]["is_final_chunk"] is True
     assert published[1][1]["malformed_lines"] == 1
     assert refresher.refresh_attempt_count == 1
     assert refresher.refresh_success_count == 1

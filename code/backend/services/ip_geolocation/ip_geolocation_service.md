@@ -126,12 +126,12 @@ This keeps lookup semantics deterministic while preserving service/refresher bou
 ## 3) Data Source and Storage
 
 Provider file location (fixed hardcoded path):
-- `code/backend/data/ip_geolocation/ipinfo-geo.json`
+- `code/backend/data/ip_geolocation/ipinfo_lite.json`
 
 For this provider-specific adapter (`ip_geolocation_ipinfo_json_file_reader_adapter.py`),
 the dataset filename and path are fixed and always read from the hardcoded location above.
 
-### 3.1 Reviewed provider file characteristics (`ipinfo-geo.json`)
+### 3.1 Reviewed provider file characteristics (`ipinfo_lite.json`)
 
 Based on the current file review, the dataset has these characteristics:
 
@@ -429,7 +429,7 @@ Performance guidance:
 
 ### 8.3 In-memory cache refresh on source file replacement/edit
 
-Because `ipinfo-geo.json` may be replaced multiple times per day, the service should support automatic refresh.
+Because `ipinfo_lite.json` may be replaced multiple times per day, the service should support automatic refresh.
 
 Recommended runtime behavior:
 
@@ -455,10 +455,10 @@ Notes:
 
 ### 8.4 Writer-side contract (important)
 
-The process that updates `ipinfo-geo.json` should use atomic replace semantics:
+The process that updates `ipinfo_lite.json` should use atomic replace semantics:
 
 1. Write new dataset to a temporary file in the same directory.
-2. Rename temp file to `ipinfo-geo.json`.
+2. Rename temp file to `ipinfo_lite.json`.
 
 This minimizes partial-write exposure and makes inode/mtime-based detection reliable in practice.
 
@@ -692,7 +692,7 @@ Integration tests:
 - payload contract consistency
 - startup progressive load with `resolution_state = "initializing_db"` during in-flight load
 - status payload includes total/loaded/failed-line metrics
-- replacing `ipinfo-geo.json` during runtime refreshes lookup results without process restart
+- replacing `ipinfo_lite.json` during runtime refreshes lookup results without process restart
 
 Use small fixture **NDJSON** files for deterministic tests.
 
@@ -803,7 +803,7 @@ Design decision:
 - Do not add a separate generic source adapter contract file until multi-provider support is needed.
 
 Behavior contract:
-1. Read `code/backend/data/ip_geolocation/ipinfo-geo.json` line-by-line.
+1. Read `code/backend/data/ip_geolocation/ipinfo_lite.json` line-by-line.
 2. Parse each non-empty line as standalone JSON object (NDJSON semantics).
 3. Normalize network values:
    - CIDR stays CIDR,

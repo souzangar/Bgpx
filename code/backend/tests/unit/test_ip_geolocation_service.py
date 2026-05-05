@@ -77,6 +77,51 @@ def test_publish_transitions_service_to_ready_and_updates_status_counters() -> N
     assert status.refresh.refresh_failure_count == 1
 
 
+def test_publish_non_final_chunk_keeps_service_loading_and_unresolved_lookup_initializing() -> None:
+    """Non-final chunk publish should keep service in loading state."""
+    service = IpGeolocationService()
+
+    service.publish_snapshot(
+        _sample_read_result(),
+        {
+            "is_final_chunk": False,
+            "total_lines": 10,
+            "malformed_lines": 2,
+        },
+    )
+
+    status = service.get_ip_geolocation_load_status()
+    assert status.service_state == "loading"
+    assert status.counters.total == 10
+    assert status.counters.loaded == 1
+    assert status.counters.malformed == 2
+
+    unresolved = service.lookup_ip_geolocation("9.9.9.9")
+    assert unresolved.status == "success"
+    assert unresolved.service_state == "loading"
+    assert unresolved.resolution_state == "initializing_db"
+
+
+def test_publish_non_final_chunk_allows_found_lookup_from_loaded_chunks() -> None:
+    """Lookup should resolve found records already loaded in non-final chunks."""
+    service = IpGeolocationService()
+
+    service.publish_snapshot(
+        _sample_read_result(),
+        {
+            "is_final_chunk": False,
+            "total_lines": 10,
+            "malformed_lines": 0,
+        },
+    )
+
+    payload = service.lookup_ip_geolocation("8.8.8.8")
+    assert payload.status == "success"
+    assert payload.service_state == "loading"
+    assert payload.resolution_state == "found"
+    assert payload.data.network == "8.8.8.0/24"
+
+
 def test_lookup_found_after_publish_returns_found_with_geo_payload() -> None:
     """Matched lookup should return found and mapped geo payload data."""
     service = IpGeolocationService()

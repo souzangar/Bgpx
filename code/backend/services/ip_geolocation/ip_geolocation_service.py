@@ -41,6 +41,7 @@ class IpGeolocationService:
         self._lock = RLock()
         self._service_state: ServiceState = "loading"
         self._snapshot: tuple[_SnapshotEntry, ...] = ()
+        self._staging_snapshot: list[_SnapshotEntry] = []
         self._counters = IpGeolocationLoadCountersModel(total=0, loaded=0, malformed=0)
         self._last_loaded_at: datetime | None = None
         self._refresh = IpGeolocationRefreshMetadataModel()
@@ -50,6 +51,7 @@ class IpGeolocationService:
         with self._lock:
             self._service_state = "loading"
             self._snapshot = ()
+            self._staging_snapshot = []
             self._counters = IpGeolocationLoadCountersModel(total=0, loaded=0, malformed=0)
             self._last_loaded_at = None
             self._refresh = IpGeolocationRefreshMetadataModel()
@@ -76,17 +78,24 @@ class IpGeolocationService:
 
         next_total = self._resolve_int(metadata.get("total_lines"), new_snapshot.total_lines)
         next_malformed = self._resolve_int(metadata.get("malformed_lines"), new_snapshot.malformed_lines)
+        is_final_chunk = self._resolve_bool(metadata.get("is_final_chunk"), True)
 
         with self._lock:
-            self._snapshot = tuple(built_entries)
+            if is_final_chunk:
+                self._staging_snapshot.extend(built_entries)
+                self._snapshot = tuple(self._staging_snapshot)
+                self._staging_snapshot = []
+            else:
+                self._staging_snapshot.extend(built_entries)
+                self._snapshot = tuple(self._staging_snapshot)
             self._counters = IpGeolocationLoadCountersModel(
                 total=next_total,
-                loaded=len(built_entries),
+                loaded=len(self._snapshot) if is_final_chunk else len(self._staging_snapshot),
                 malformed=next_malformed,
             )
             self._last_loaded_at = datetime.now(UTC)
             self._refresh = next_refresh
-            self._service_state = "ready"
+            self._service_state = "ready" if is_final_chunk else "loading"
 
     def lookup_ip_geolocation(self, ip: str) -> IpGeolocationLookupResponseModel:
         """Resolve a requested IP against the active in-memory snapshot."""
@@ -188,6 +197,22 @@ class IpGeolocationService:
     @staticmethod
     def _resolve_datetime(value: object) -> datetime | None:
         return value if isinstance(value, datetime) else None
+
+    @staticmethod
+    def _resolve_bool(value: object, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            return value != 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return True
+            if normalized in {"0", "false", "no", "off"}:
+                return False
+        return default
 
     @staticmethod
     def _extract_fingerprint_model(value: object) -> IpGeolocationSourceFingerprintModel | None:

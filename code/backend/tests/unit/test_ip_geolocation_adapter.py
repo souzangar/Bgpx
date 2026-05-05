@@ -17,7 +17,7 @@ from infra.ip_geolocation.ip_geolocation_ipinfo_json_file_reader_adapter import 
 
 def test_ip_geolocation_adapter_reads_and_parses_ndjson_file(tmp_path: Path) -> None:
     """Adapter should read file, parse records, and report malformed line counts."""
-    data_file = tmp_path / "ipinfo-geo.json"
+    data_file = tmp_path / "ipinfo_lite.json"
     data_file.write_text(
         "\n".join(
             [
@@ -49,9 +49,9 @@ def test_ip_geolocation_adapter_reads_and_parses_ndjson_file(tmp_path: Path) -> 
     assert result.records[1].network == "8.8.8.8/32"
 
 
-def test_ip_geolocation_adapter_iter_read_results_streams_cumulative_chunks(tmp_path: Path) -> None:
-    """Chunk iterator should yield cumulative snapshots for progressive publish flows."""
-    data_file = tmp_path / "ipinfo-geo.json"
+def test_ip_geolocation_adapter_iter_read_results_streams_delta_chunks(tmp_path: Path) -> None:
+    """Chunk iterator should yield per-chunk delta records for progressive publish flows."""
+    data_file = tmp_path / "ipinfo_lite.json"
     data_file.write_text(
         "\n".join(
             [
@@ -87,4 +87,5 @@ def test_ip_geolocation_adapter_iter_read_results_streams_cumulative_chunks(tmp_
     second = chunks[1]
     assert second.total_lines == 4
     assert second.malformed_lines == 1
-    assert len(second.records) == 3
+    assert len(second.records) == 1
+    assert second.records[0].network == "9.9.9.0/24"

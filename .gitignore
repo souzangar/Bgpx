@@ -49,3 +49,5 @@ node_modules/
 ip-geo-sample.json
 code/backend/data/ip_geolocation/ipinfo-geo.json
 code/backend/data/ip_geolocation/ipinfo-geo.json.gz
+code/backend/data/ip_geolocation/ipinfo_lite.json.gz
+code/backend/data/ip_geolocation/ipinfo_lite.json

@@ -5,10 +5,10 @@ info:
 
 http:
   method: GET
-  url: https://localhost/api/geo/lookup?ip=8.8.8.8
+  url: https://localhost/api/geo/lookup?ip=1.1.1.1
   params:
     - name: ip
-      value: 8.8.8.8
+      value: 1.1.1.1
       type: query
   body:
     type: json
