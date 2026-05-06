@@ -190,17 +190,15 @@ async def _app_lifespan(_app: FastAPI):
 
     bootstrap_completed = False
 
-    def _run_bootstrap_once() -> None:
+    async def _run_bootstrap_once() -> None:
         nonlocal bootstrap_completed
         if bootstrap_completed:
             return
-        ip_geolocation_downloader.run_once()
-        ip_geolocation_refresher.run_once()
+
+        await asyncio.to_thread(ip_geolocation_downloader.run_once)
+        await asyncio.to_thread(ip_geolocation_refresher.run_once)
+
         bootstrap_completed = True
-        # Bootstrap is a one-time warm-up task. Stop it after first success so
-        # lower-priority tasks in the same resource group are not continuously
-        # gated by resource-sequence ordering.
-        runner.stop_background_task(IP_GEO_BOOTSTRAP_TASK_ID)
 
     ip_geo_bootstrap_task = BackgroundTaskDefinition(
         task_id=IP_GEO_BOOTSTRAP_TASK_ID,
@@ -208,6 +206,7 @@ async def _app_lifespan(_app: FastAPI):
         run_once=_run_bootstrap_once,
         resource_key=IP_GEO_DATASET_RESOURCE_KEY,
         resource_sequence=IP_GEO_BOOTSTRAP_SEQUENCE,
+        stop_after_success=True,
     )
 
     ip_geo_ipinfo_gz_downloader_task = BackgroundTaskDefinition(

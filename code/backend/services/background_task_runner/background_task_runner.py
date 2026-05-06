@@ -15,11 +15,29 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import inspect
+import logging
+import os
 import random
 from threading import RLock
 import time
 
 from models.background_task_runner import BackgroundTaskDefinition, BackgroundTaskStatus
+
+
+_VERBOSE_ENV = "BGPX_VERBOSE"
+_TRUTHY_VALUES = {"1", "true", "yes", "on"}
+_logger = logging.getLogger("uvicorn.error")
+
+_IP_GEO_TASK_IDS = {
+    "ip_geolocation_bootstrap_once",
+    "ip_geolocation_ipinfo_gz_downloader",
+    "ip_geolocation_data_refresh",
+}
+
+
+def _is_verbose_enabled() -> bool:
+    """Return whether verbose logging is enabled from runtime environment."""
+    return os.getenv(_VERBOSE_ENV, "0").strip().lower() in _TRUTHY_VALUES
 
 
 @dataclass
@@ -155,7 +173,15 @@ class BackgroundTaskRunner:
         resource_group: _ResourceGroupState,
         task_id: str,
     ) -> bool:
-        """Return whether any earlier-sequence running task is eligible and should go first."""
+        """Return whether earlier-sequence startup ordering should block this task.
+
+        Sequence ordering is intended to guarantee deterministic *first-run* priority
+        for lower-sequence tasks in the same resource group.
+
+        After a preceding task has completed at least one run, it should no longer
+        permanently gate higher-sequence periodic tasks, otherwise starvation can
+        occur when the lower-sequence task remains continuously eligible.
+        """
         try:
             current_index = resource_group.task_ids.index(task_id)
         except ValueError:
@@ -166,6 +192,8 @@ class BackgroundTaskRunner:
             if preceding_state is None:
                 continue
             if not preceding_state.status.is_running:
+                continue
+            if preceding_state.status.total_runs > 0:
                 continue
             if preceding_state.run_in_progress:
                 continue
@@ -262,9 +290,20 @@ class BackgroundTaskRunner:
                 state.status,
                 skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
             )
+            if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
+                _logger.info(
+                    "BG runner skip task_id=%s reason=resource_group_active active_task_id=%s",
+                    task_id,
+                    resource_group.active_task_id,
+                )
             return True
 
         if self._resource_group_preceding_task_is_eligible(resource_group, task_id):
+            if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
+                _logger.info(
+                    "BG runner skip task_id=%s reason=preceding_task_eligible",
+                    task_id,
+                )
             return True
 
         return False
@@ -306,6 +345,11 @@ class BackgroundTaskRunner:
                     state.status,
                     skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
                 )
+                if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
+                    _logger.info(
+                        "BG runner skip task_id=%s reason=run_in_progress",
+                        task_id,
+                    )
                 return
 
             self._set_task_as_running_for_next_run(task_id, state)
@@ -313,6 +357,9 @@ class BackgroundTaskRunner:
 
         if not should_spawn_run_task:
             return
+
+        if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
+            _logger.info("BG runner schedule task_id=%s", task_id)
 
         run_task = asyncio.create_task(
             self._execute_registered_task_run(task_id),
@@ -399,6 +446,20 @@ class BackgroundTaskRunner:
         )
         state.next_eligible_run_at_monotonic = 0.0
 
+    def _stop_task_loop_after_success(
+        self,
+        state: _RegisteredTaskState,
+        tasks_to_cancel: list[asyncio.Task[None]],
+    ) -> None:
+        """Stop one-shot task loop after a successful run without cancelling current run."""
+        if not state.task_definition.stop_after_success:
+            return
+
+        state.status = replace(state.status, is_running=False)
+        if state.loop_handle is not None:
+            tasks_to_cancel.append(state.loop_handle)
+            state.loop_handle = None
+
     def _apply_failure_status_after_run(
         self,
         state: _RegisteredTaskState,
@@ -443,6 +504,37 @@ class BackgroundTaskRunner:
         if state.status.is_running:
             state.status = replace(state.status, is_running=False)
 
+    def _collect_peer_task_ids_for_scheduling(
+        self,
+        task_id: str,
+        state: _RegisteredTaskState,
+    ) -> list[str]:
+        """Return peer task ids in the same resource group eligible for immediate scheduling.
+
+        Called under ``_state_lock`` after releasing runtime guards so that peers
+        blocked by this task's ``active_task_id`` get an immediate scheduling
+        opportunity rather than waiting for their next loop tick.
+        """
+        resource_key = state.task_definition.resource_key
+        if resource_key is None:
+            return []
+
+        resource_group = self._resource_groups.get(resource_key)
+        if resource_group is None:
+            return []
+
+        peer_ids: list[str] = []
+        for peer_id in resource_group.task_ids:
+            if peer_id == task_id:
+                continue
+            peer_state = self._registry.get(peer_id)
+            if peer_state is None:
+                continue
+            if peer_state.status.is_running and not peer_state.run_in_progress:
+                peer_ids.append(peer_id)
+
+        return peer_ids
+
     def _finalize_registered_task_run(
         self,
         task_id: str,
@@ -451,6 +543,9 @@ class BackgroundTaskRunner:
         was_cancelled: bool,
     ) -> None:
         """Finalize run attempt by releasing guards and applying status policy."""
+        tasks_to_cancel: list[asyncio.Task[None]] = []
+        peer_task_ids_to_schedule: list[str] = []
+
         with self._state_lock:
             state = self._registry.get(task_id)
             if state is None:
@@ -458,15 +553,37 @@ class BackgroundTaskRunner:
 
             self._release_runtime_guards_after_run(task_id, state)
 
+            # Collect peers that may have been blocked by this task holding
+            # the resource group active_task_id.  They get an immediate
+            # scheduling attempt after the lock is released.
+            peer_task_ids_to_schedule = self._collect_peer_task_ids_for_scheduling(
+                task_id, state
+            )
+
             if was_cancelled:
-                return
-
-            if succeeded:
+                # Still allow peer scheduling even on cancellation so the
+                # resource group is not permanently starved.
+                pass
+            elif succeeded:
                 self._apply_success_status_after_run(state)
-                return
-
-            if error_message is not None:
+                self._stop_task_loop_after_success(state, tasks_to_cancel)
+            elif error_message is not None:
                 self._apply_failure_status_after_run(state, error_message)
+
+        current_task = asyncio.current_task()
+        for task in tasks_to_cancel:
+            if task is not current_task and not task.done():
+                task.cancel()
+
+        # Immediate peer scheduling — breaks phase-alignment starvation.
+        for peer_id in peer_task_ids_to_schedule:
+            if _is_verbose_enabled() and peer_id in _IP_GEO_TASK_IDS:
+                _logger.info(
+                    "BG runner peer-schedule task_id=%s triggered_by=%s",
+                    peer_id,
+                    task_id,
+                )
+            self._schedule_task_run_if_possible(peer_id)
 
     def start_background_task_runner(self) -> None:
         """Start runner lifecycle idempotently."""

@@ -55,6 +55,7 @@ class BackgroundTaskDefinition:
     retry_backoff: RetryBackoffConfig = field(default_factory=RetryBackoffConfig)
     resource_key: str | None = None
     resource_sequence: int = 0
+    stop_after_success: bool = False
 
     def __post_init__(self) -> None:
         """Validate registration contract values."""
