@@ -80,17 +80,25 @@ class IpGeolocationService:
         next_malformed = self._resolve_int(metadata.get("malformed_lines"), new_snapshot.malformed_lines)
         is_final_chunk = self._resolve_bool(metadata.get("is_final_chunk"), True)
 
+        next_snapshot: tuple[_SnapshotEntry, ...]
+        next_loaded_count: int
+
         with self._lock:
             if is_final_chunk:
                 self._staging_snapshot.extend(built_entries)
-                self._snapshot = tuple(self._staging_snapshot)
+                next_snapshot = tuple(self._staging_snapshot)
                 self._staging_snapshot = []
+                next_loaded_count = len(next_snapshot)
             else:
                 self._staging_snapshot.extend(built_entries)
-                self._snapshot = tuple(self._staging_snapshot)
+                next_snapshot = tuple(self._staging_snapshot)
+                next_loaded_count = len(self._staging_snapshot)
+
+        with self._lock:
+            self._snapshot = next_snapshot
             self._counters = IpGeolocationLoadCountersModel(
                 total=next_total,
-                loaded=len(self._snapshot) if is_final_chunk else len(self._staging_snapshot),
+                loaded=next_loaded_count,
                 malformed=next_malformed,
             )
             self._last_loaded_at = datetime.now(UTC)

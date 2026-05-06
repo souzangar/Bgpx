@@ -30,6 +30,8 @@ def _build_task(
     base_delay_seconds: float = 0.01,
     max_delay_seconds: float = 0.05,
     jitter_ratio: float = 0.0,
+    resource_key: str | None = None,
+    resource_sequence: int = 0,
 ) -> BackgroundTaskDefinition:
     """Create test task definition with deterministic retry config."""
     return BackgroundTaskDefinition(
@@ -41,6 +43,8 @@ def _build_task(
             max_delay_seconds=max_delay_seconds,
             jitter_ratio=jitter_ratio,
         ),
+        resource_key=resource_key,
+        resource_sequence=resource_sequence,
     )
 
 
@@ -385,6 +389,162 @@ def test_sync_task_run_is_offloaded_and_keeps_event_loop_responsive() -> None:
             assert ticker_count == 6
         finally:
             runner.stop_background_task(task_id)
+            runner.stop_background_task_runner()
+            await asyncio.sleep(0.01)
+
+    asyncio.run(_scenario())
+
+
+def test_resource_key_group_prevents_overlap_between_distinct_tasks() -> None:
+    """Tasks sharing one resource_key should never execute concurrently."""
+
+    async def _scenario() -> None:
+        runner = BackgroundTaskRunner()
+        active_runs = 0
+        max_concurrent_runs = 0
+
+        async def _run_once() -> None:
+            nonlocal active_runs, max_concurrent_runs
+            active_runs += 1
+            max_concurrent_runs = max(max_concurrent_runs, active_runs)
+            try:
+                await asyncio.sleep(0.03)
+            finally:
+                active_runs -= 1
+
+        runner.start_background_task_runner()
+        runner.register_background_task(
+            _build_task(
+                "group-a",
+                _run_once,
+                interval_seconds=0.01,
+                resource_key="shared-resource",
+                resource_sequence=10,
+            )
+        )
+        runner.register_background_task(
+            _build_task(
+                "group-b",
+                _run_once,
+                interval_seconds=0.01,
+                resource_key="shared-resource",
+                resource_sequence=20,
+            )
+        )
+        runner.start_background_task("group-a")
+        runner.start_background_task("group-b")
+
+        try:
+            await asyncio.sleep(0.18)
+            assert max_concurrent_runs == 1
+        finally:
+            runner.stop_background_task("group-a")
+            runner.stop_background_task("group-b")
+            runner.stop_background_task_runner()
+            await asyncio.sleep(0.01)
+
+    asyncio.run(_scenario())
+
+
+def test_resource_key_sequence_prioritizes_lower_sequence_task() -> None:
+    """Within a resource group, lower sequence task should run before higher sequence task."""
+
+    async def _scenario() -> None:
+        runner = BackgroundTaskRunner()
+        call_order: list[str] = []
+
+        async def _run_low() -> None:
+            call_order.append("low")
+            await asyncio.sleep(0.03)
+
+        async def _run_high() -> None:
+            call_order.append("high")
+            await asyncio.sleep(0.01)
+
+        runner.start_background_task_runner()
+        runner.register_background_task(
+            _build_task(
+                "seq-high",
+                _run_high,
+                interval_seconds=0.01,
+                resource_key="shared-resource",
+                resource_sequence=20,
+            )
+        )
+        runner.register_background_task(
+            _build_task(
+                "seq-low",
+                _run_low,
+                interval_seconds=0.01,
+                resource_key="shared-resource",
+                resource_sequence=10,
+            )
+        )
+
+        # Intentionally start high first; scheduler should still prioritize low.
+        runner.start_background_task("seq-high")
+        runner.start_background_task("seq-low")
+
+        try:
+            await asyncio.sleep(0.08)
+            assert call_order
+            assert call_order[0] == "low"
+        finally:
+            runner.stop_background_task("seq-low")
+            runner.stop_background_task("seq-high")
+            runner.stop_background_task_runner()
+            await asyncio.sleep(0.01)
+
+    asyncio.run(_scenario())
+
+
+def test_resource_group_tasks_keep_event_loop_responsive() -> None:
+    """Resource-group scheduling should not block unrelated event-loop progress."""
+
+    async def _scenario() -> None:
+        runner = BackgroundTaskRunner()
+
+        def _run_sync() -> None:
+            import time
+
+            time.sleep(0.03)
+
+        runner.start_background_task_runner()
+        runner.register_background_task(
+            _build_task(
+                "group-sync-a",
+                _run_sync,
+                interval_seconds=0.01,
+                resource_key="shared-resource",
+                resource_sequence=10,
+            )
+        )
+        runner.register_background_task(
+            _build_task(
+                "group-sync-b",
+                _run_sync,
+                interval_seconds=0.01,
+                resource_key="shared-resource",
+                resource_sequence=20,
+            )
+        )
+        runner.start_background_task("group-sync-a")
+        runner.start_background_task("group-sync-b")
+
+        ticker_count = 0
+
+        async def _ticker() -> None:
+            nonlocal ticker_count
+            for _ in range(8):
+                await asyncio.sleep(0.01)
+                ticker_count += 1
+
+        try:
+            await _ticker()
+            assert ticker_count == 8
+        finally:
+            runner.stop_background_task("group-sync-a")
+            runner.stop_background_task("group-sync-b")
             runner.stop_background_task_runner()
             await asyncio.sleep(0.01)
 

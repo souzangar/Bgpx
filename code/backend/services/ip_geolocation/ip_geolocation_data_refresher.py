@@ -60,7 +60,7 @@ class IpGeolocationDataRefresher:
         debounce_seconds: float = 0.5,
         stat_func: Callable[[str | os.PathLike[str]], Any] = os.stat,
         sleep_func: Callable[[float], None] = time.sleep,
-        publish_chunk_size: int = 5_000,
+        publish_chunk_size: int = 50_000,
     ) -> None:
         self._publish_snapshot = publish_snapshot
         self._is_snapshot_equivalent = is_snapshot_equivalent

@@ -184,8 +184,8 @@ Method naming examples:
 - `lookup_ip_geolocation(ip: str)`
 - `get_ip_geolocation_load_status()`
 - `reload_ip_geolocation_dataset()`
-- `start_ip_geolocation_source_watch()`
-- `stop_ip_geolocation_source_watch()`
+- `start_ip_geolocation_data_refresh()`
+- `stop_ip_geolocation_data_refresh()`
 
 ### 4.2 Pre-implementation alignment decisions (locked for v1)
 
@@ -481,10 +481,10 @@ Planned methods:
 - `reload_ip_geolocation_dataset() -> None` (optional)
   - manual refresh entrypoint
 
-- `start_ip_geolocation_source_watch() -> None` (optional)
+- `start_ip_geolocation_data_refresh() -> None` (optional)
   - register/start IP geolocation refresher task in background task runner
 
-- `stop_ip_geolocation_source_watch() -> None` (optional)
+- `stop_ip_geolocation_data_refresh() -> None` (optional)
   - unregister/stop IP geolocation refresher task from background task runner
 
 ---
@@ -498,7 +498,7 @@ Startup order (inside lifespan startup):
 1. Resolve shared background runner and start it idempotently.
 2. Construct/resolve `ip_geolocation_service`.
 3. Construct `ip_geolocation_data_refresher` bound to that service.
-4. Register refresher task (recommended id: `ip_geolocation_source_watch`).
+4. Register refresher task (recommended id: `ip_geolocation_data_refresh`).
 5. Start refresher task.
 
 Shutdown order (inside lifespan shutdown/finally):
@@ -831,7 +831,7 @@ Responsibilities:
 
 Runner integration:
 - Register refresher as background task in `background_task_runner`.
-- Suggested task id: `ip_geolocation_source_watch`.
+- Suggested task id: `ip_geolocation_data_refresh`.
 
 Acceptance checks:
 - Unchanged fingerprint does not trigger reload.

@@ -53,8 +53,8 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             assert gz_watch_status.task_id == "ip_geolocation_ipinfo_gz_downloader"
             assert gz_watch_status.is_running is True
 
-            status = runner.get_background_task_status("ip_geolocation_source_watch")
-            assert status.task_id == "ip_geolocation_source_watch"
+            status = runner.get_background_task_status("ip_geolocation_data_refresh")
+            assert status.task_id == "ip_geolocation_data_refresh"
             assert status.is_running is True
 
         with TestClient(app) as client:
@@ -64,7 +64,7 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
             assert gz_watch_status.is_running is True
 
-            status = runner.get_background_task_status("ip_geolocation_source_watch")
+            status = runner.get_background_task_status("ip_geolocation_data_refresh")
             assert status.is_running is True
 
         with TestClient(app):
@@ -74,6 +74,6 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
 
         with pytest.raises(KeyError):
-            runner.get_background_task_status("ip_geolocation_source_watch")
+            runner.get_background_task_status("ip_geolocation_data_refresh")
     finally:
         reset_background_task_runner_for_tests()

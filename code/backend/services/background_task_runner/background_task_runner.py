@@ -11,6 +11,7 @@ Retry/backoff error policy execution flow is implemented in Step 6.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import inspect
@@ -33,6 +34,15 @@ class _RegisteredTaskState:
     next_eligible_run_at_monotonic: float = 0.0
 
 
+@dataclass
+class _ResourceGroupState:
+    """Internal runtime state shared by tasks within the same resource key."""
+
+    resource_key: str
+    task_ids: list[str]
+    active_task_id: str | None = None
+
+
 class BackgroundTaskRunner:
     """Own process-local runtime state for background tasks.
 
@@ -42,8 +52,59 @@ class BackgroundTaskRunner:
 
     def __init__(self) -> None:
         self._registry: dict[str, _RegisteredTaskState] = {}
+        self._resource_groups: dict[str, _ResourceGroupState] = {}
         self._runner_started: bool = False
         self._state_lock = RLock()
+        self._sync_executor: ThreadPoolExecutor | None = None
+
+    def _sort_resource_group_task_ids(self, task_ids: list[str]) -> list[str]:
+        """Return task ids sorted by sequence, then task_id for stable ordering."""
+        return sorted(
+            task_ids,
+            key=lambda task_id: (
+                self._registry[task_id].task_definition.resource_sequence,
+                task_id,
+            ),
+        )
+
+    def _add_task_to_resource_group(self, task_definition: BackgroundTaskDefinition) -> None:
+        """Register task membership in a resource group when key is provided."""
+        resource_key = task_definition.resource_key
+        if resource_key is None:
+            return
+
+        group_state = self._resource_groups.get(resource_key)
+        if group_state is None:
+            self._resource_groups[resource_key] = _ResourceGroupState(
+                resource_key=resource_key,
+                task_ids=[task_definition.task_id],
+            )
+            return
+
+        group_state.task_ids.append(task_definition.task_id)
+        group_state.task_ids = self._sort_resource_group_task_ids(group_state.task_ids)
+
+    def _remove_task_from_resource_group(self, task_definition: BackgroundTaskDefinition) -> None:
+        """Unregister task membership in a resource group when key is provided."""
+        resource_key = task_definition.resource_key
+        if resource_key is None:
+            return
+
+        group_state = self._resource_groups.get(resource_key)
+        if group_state is None:
+            return
+
+        if task_definition.task_id in group_state.task_ids:
+            group_state.task_ids.remove(task_definition.task_id)
+
+        if group_state.active_task_id == task_definition.task_id:
+            group_state.active_task_id = None
+
+        if not group_state.task_ids:
+            self._resource_groups.pop(resource_key, None)
+            return
+
+        group_state.task_ids = self._sort_resource_group_task_ids(group_state.task_ids)
 
     def _build_initial_task_status(self, task_id: str) -> BackgroundTaskStatus:
         """Create deterministic initial status for a newly registered task."""
@@ -75,6 +136,7 @@ class BackgroundTaskRunner:
                 task_definition=task_definition,
                 status=self._build_initial_task_status(task_definition.task_id),
             )
+            self._add_task_to_resource_group(task_definition)
 
     def _unregister_task_state(self, task_id: str) -> _RegisteredTaskState:
         """Remove and return a task state from registry.
@@ -84,7 +146,34 @@ class BackgroundTaskRunner:
         """
         with self._state_lock:
             self._require_registered_task(task_id)
-            return self._registry.pop(task_id)
+            removed_state = self._registry.pop(task_id)
+            self._remove_task_from_resource_group(removed_state.task_definition)
+            return removed_state
+
+    def _resource_group_preceding_task_is_eligible(
+        self,
+        resource_group: _ResourceGroupState,
+        task_id: str,
+    ) -> bool:
+        """Return whether any earlier-sequence running task is eligible and should go first."""
+        try:
+            current_index = resource_group.task_ids.index(task_id)
+        except ValueError:
+            return False
+
+        for preceding_task_id in resource_group.task_ids[:current_index]:
+            preceding_state = self._registry.get(preceding_task_id)
+            if preceding_state is None:
+                continue
+            if not preceding_state.status.is_running:
+                continue
+            if preceding_state.run_in_progress:
+                continue
+            if time.monotonic() < preceding_state.next_eligible_run_at_monotonic:
+                continue
+            return True
+
+        return False
 
     def _get_task_status_snapshot(self, task_id: str) -> BackgroundTaskStatus:
         """Return a copy of task status for safe external reads."""
@@ -150,6 +239,8 @@ class BackgroundTaskRunner:
 
     def _schedule_task_run_if_possible(self, task_id: str) -> None:
         """Schedule one task run while enforcing overlap policy."""
+        should_spawn_run_task = False
+
         with self._state_lock:
             state = self._registry.get(task_id)
             if state is None:
@@ -161,6 +252,23 @@ class BackgroundTaskRunner:
             if time.monotonic() < state.next_eligible_run_at_monotonic:
                 return
 
+            resource_key = state.task_definition.resource_key
+            if resource_key is not None:
+                resource_group = self._resource_groups.get(resource_key)
+                if resource_group is not None:
+                    if (
+                        resource_group.active_task_id is not None
+                        and resource_group.active_task_id != task_id
+                    ):
+                        state.status = replace(
+                            state.status,
+                            skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
+                        )
+                        return
+
+                    if self._resource_group_preceding_task_is_eligible(resource_group, task_id):
+                        return
+
             if state.run_in_progress:
                 # Step 5 fully implements SKIP_IF_RUNNING. Other policies remain
                 # future-ready placeholders and currently use safe skip behavior.
@@ -171,16 +279,30 @@ class BackgroundTaskRunner:
                 return
 
             state.run_in_progress = True
+            if resource_key is not None:
+                resource_group = self._resource_groups.get(resource_key)
+                if resource_group is not None:
+                    resource_group.active_task_id = task_id
             state.status = replace(
                 state.status,
                 last_run_started_at=datetime.now(UTC),
                 total_runs=state.status.total_runs + 1,
             )
+            should_spawn_run_task = True
 
-            run_task = asyncio.create_task(
-                self._execute_registered_task_run(task_id),
-                name=f"background-task-run:{task_id}",
-            )
+        if not should_spawn_run_task:
+            return
+
+        run_task = asyncio.create_task(
+            self._execute_registered_task_run(task_id),
+            name=f"background-task-run:{task_id}",
+        )
+
+        with self._state_lock:
+            state = self._registry.get(task_id)
+            if state is None or not state.run_in_progress:
+                run_task.cancel()
+                return
             state.run_handle = run_task
 
     async def _execute_registered_task_run(self, task_id: str) -> None:
@@ -201,7 +323,10 @@ class BackgroundTaskRunner:
             if inspect.iscoroutinefunction(run_callable):
                 await run_callable()
             else:
-                await asyncio.to_thread(run_callable)
+                event_loop = asyncio.get_running_loop()
+                with self._state_lock:
+                    sync_executor = self._sync_executor
+                await event_loop.run_in_executor(sync_executor, run_callable)
             succeeded = True
         except asyncio.CancelledError:
             was_cancelled = True
@@ -216,6 +341,14 @@ class BackgroundTaskRunner:
                         state.run_handle = None
 
                     state.run_in_progress = False
+                    resource_key = state.task_definition.resource_key
+                    if resource_key is not None:
+                        resource_group = self._resource_groups.get(resource_key)
+                        if (
+                            resource_group is not None
+                            and resource_group.active_task_id == task_id
+                        ):
+                            resource_group.active_task_id = None
 
                     if not was_cancelled:
                         if succeeded:
@@ -247,21 +380,34 @@ class BackgroundTaskRunner:
             if self._runner_started:
                 return
 
+            if self._sync_executor is None:
+                self._sync_executor = ThreadPoolExecutor(
+                    max_workers=2,
+                    thread_name_prefix="bg-task-runner",
+                )
             self._runner_started = True
 
     def stop_background_task_runner(self) -> None:
         """Stop runner lifecycle idempotently and clear task runtime markers."""
         tasks_to_cancel: list[asyncio.Task[None]] = []
+        executor_to_shutdown: ThreadPoolExecutor | None = None
 
         with self._state_lock:
             if not self._runner_started:
                 return
 
             self._runner_started = False
+            executor_to_shutdown = self._sync_executor
+            self._sync_executor = None
 
             for state in self._registry.values():
                 state.run_in_progress = False
                 state.next_eligible_run_at_monotonic = 0.0
+                resource_key = state.task_definition.resource_key
+                if resource_key is not None:
+                    resource_group = self._resource_groups.get(resource_key)
+                    if resource_group is not None:
+                        resource_group.active_task_id = None
                 if state.loop_handle is not None:
                     tasks_to_cancel.append(state.loop_handle)
                     state.loop_handle = None
@@ -277,6 +423,9 @@ class BackgroundTaskRunner:
             if not task.done():
                 task.cancel()
 
+        if executor_to_shutdown is not None:
+            executor_to_shutdown.shutdown(wait=False, cancel_futures=False)
+
     def register_background_task(self, task: BackgroundTaskDefinition) -> None:
         """Register task definition in runner registry.
 
@@ -288,10 +437,7 @@ class BackgroundTaskRunner:
     def unregister_background_task(self, task_id: str) -> None:
         """Unregister task definition after idempotent logical stop."""
         self.stop_background_task(task_id)
-
-        with self._state_lock:
-            self._require_registered_task(task_id)
-            self._registry.pop(task_id)
+        self._unregister_task_state(task_id)
 
     def start_background_task(self, task_id: str) -> None:
         """Start one registered task idempotently.
@@ -345,6 +491,11 @@ class BackgroundTaskRunner:
             state.status = replace(state.status, is_running=False)
             state.run_in_progress = False
             state.next_eligible_run_at_monotonic = 0.0
+            resource_key = state.task_definition.resource_key
+            if resource_key is not None:
+                resource_group = self._resource_groups.get(resource_key)
+                if resource_group is not None and resource_group.active_task_id == task_id:
+                    resource_group.active_task_id = None
             if state.loop_handle is not None:
                 tasks_to_cancel.append(state.loop_handle)
             state.loop_handle = None

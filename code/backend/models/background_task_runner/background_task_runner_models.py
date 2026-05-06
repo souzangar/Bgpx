@@ -53,6 +53,8 @@ class BackgroundTaskDefinition:
     run_once: TaskCallable
     overlap_policy: OverlapPolicy = OverlapPolicy.SKIP_IF_RUNNING
     retry_backoff: RetryBackoffConfig = field(default_factory=RetryBackoffConfig)
+    resource_key: str | None = None
+    resource_sequence: int = 0
 
     def __post_init__(self) -> None:
         """Validate registration contract values."""
@@ -64,6 +66,12 @@ class BackgroundTaskDefinition:
 
         if not callable(self.run_once):
             raise ValueError("run_once must be callable")
+
+        if self.resource_key is not None and not self.resource_key.strip():
+            raise ValueError("resource_key must be a non-empty string when provided")
+
+        if self.resource_sequence < 0:
+            raise ValueError("resource_sequence must be >= 0")
 
 
 @dataclass

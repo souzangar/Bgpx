@@ -51,3 +51,4 @@ code/backend/data/ip_geolocation/ipinfo-geo.json
 code/backend/data/ip_geolocation/ipinfo-geo.json.gz
 code/backend/data/ip_geolocation/ipinfo_lite.json.gz
 code/backend/data/ip_geolocation/ipinfo_lite.json
+code/backend/data/ip_geolocation/ipinfo_lite.tmp.json

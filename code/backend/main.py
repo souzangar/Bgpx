@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
@@ -30,10 +31,16 @@ FRONTEND_DEV_URL_ENV = "BGPX_FRONTEND_DEV_URL"
 VERBOSE_ENV = "BGPX_VERBOSE"
 DEFAULT_FRONTEND_DEV_URL = "https://localhost:5173"
 FRONTEND_STARTUP_TIMEOUT_SECONDS = 30.0
-IP_GEO_REFRESH_TASK_ID = "ip_geolocation_source_watch"
+IP_GEO_BOOTSTRAP_TASK_ID = "ip_geolocation_bootstrap_once"
+IP_GEO_REFRESH_TASK_ID = "ip_geolocation_data_refresh"
 IP_GEO_REFRESH_INTERVAL_SECONDS = 1.0
 IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_ID = "ip_geolocation_ipinfo_gz_downloader"
 IP_GEO_IPINFO_GZ_DOWNLOADER_INTERVAL_SECONDS = 1.0
+IP_GEO_BOOTSTRAP_INTERVAL_SECONDS = 0.5
+IP_GEO_DATASET_RESOURCE_KEY = "ip_geolocation_database_handler"
+IP_GEO_BOOTSTRAP_SEQUENCE = 5
+IP_GEO_IPINFO_GZ_DOWNLOADER_SEQUENCE = 10
+IP_GEO_REFRESH_SEQUENCE = 20
 
 
 def _resolve_frontend_mode(explicit_mode: str | None = None) -> str:
@@ -181,17 +188,45 @@ async def _app_lifespan(_app: FastAPI):
         apply_snapshot_delta=ip_geolocation_service.apply_snapshot_delta,
     )
 
+    bootstrap_completed = False
+
+    def _run_bootstrap_once() -> None:
+        nonlocal bootstrap_completed
+        if bootstrap_completed:
+            return
+        ip_geolocation_downloader.run_once()
+        ip_geolocation_refresher.run_once()
+        bootstrap_completed = True
+
+    ip_geo_bootstrap_task = BackgroundTaskDefinition(
+        task_id=IP_GEO_BOOTSTRAP_TASK_ID,
+        interval_seconds=IP_GEO_BOOTSTRAP_INTERVAL_SECONDS,
+        run_once=_run_bootstrap_once,
+        resource_key=IP_GEO_DATASET_RESOURCE_KEY,
+        resource_sequence=IP_GEO_BOOTSTRAP_SEQUENCE,
+    )
+
     ip_geo_ipinfo_gz_downloader_task = BackgroundTaskDefinition(
         task_id=IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_ID,
         interval_seconds=IP_GEO_IPINFO_GZ_DOWNLOADER_INTERVAL_SECONDS,
         run_once=ip_geolocation_downloader.run_once,
+        resource_key=IP_GEO_DATASET_RESOURCE_KEY,
+        resource_sequence=IP_GEO_IPINFO_GZ_DOWNLOADER_SEQUENCE,
     )
 
     ip_geo_refresh_task = BackgroundTaskDefinition(
         task_id=IP_GEO_REFRESH_TASK_ID,
         interval_seconds=IP_GEO_REFRESH_INTERVAL_SECONDS,
         run_once=ip_geolocation_refresher.run_once,
+        resource_key=IP_GEO_DATASET_RESOURCE_KEY,
+        resource_sequence=IP_GEO_REFRESH_SEQUENCE,
     )
+
+    try:
+        runner.register_background_task(ip_geo_bootstrap_task)
+    except ValueError:
+        # Task already registered in this process; keep lifecycle idempotent.
+        pass
 
     try:
         runner.register_background_task(ip_geo_ipinfo_gz_downloader_task)
@@ -205,6 +240,7 @@ async def _app_lifespan(_app: FastAPI):
         # Task already registered in this process; keep lifecycle idempotent.
         pass
 
+    runner.start_background_task(IP_GEO_BOOTSTRAP_TASK_ID)
     runner.start_background_task(IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_ID)
     runner.start_background_task(IP_GEO_REFRESH_TASK_ID)
 
@@ -212,12 +248,22 @@ async def _app_lifespan(_app: FastAPI):
         yield
     finally:
         try:
+            runner.stop_background_task(IP_GEO_BOOTSTRAP_TASK_ID)
+        except KeyError:
+            pass
+
+        try:
             runner.stop_background_task(IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_ID)
         except KeyError:
             pass
 
         try:
             runner.stop_background_task(IP_GEO_REFRESH_TASK_ID)
+        except KeyError:
+            pass
+
+        try:
+            runner.unregister_background_task(IP_GEO_BOOTSTRAP_TASK_ID)
         except KeyError:
             pass
 
