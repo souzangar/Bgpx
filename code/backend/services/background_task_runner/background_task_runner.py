@@ -26,7 +26,7 @@ from models.background_task_runner import BackgroundTaskDefinition, BackgroundTa
 
 _VERBOSE_ENV = "BGPX_VERBOSE"
 _TRUTHY_VALUES = {"1", "true", "yes", "on"}
-_logger = logging.getLogger("uvicorn.error")
+_logger = logging.getLogger("bgpx.runner.background_task_runner")
 
 _IP_GEO_TASK_IDS = {
     "ip_geolocation_bootstrap_once",
