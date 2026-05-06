@@ -16,7 +16,6 @@ from models.background_task_runner import BackgroundTaskDefinition
 from services.background_task_runner import get_background_task_runner
 from services.ip_geolocation.ip_geolocation_data_downloader import IpGeolocationDataDownloader
 from services.ip_geolocation.ip_geolocation_data_refresher import IpGeolocationDataRefresher
-from services.logging import configure_backend_logging
 
 
 IP_GEO_BOOTSTRAP_TASK_ID = "ip_geolocation_bootstrap_once"
@@ -62,7 +61,6 @@ def _unregister_background_task_idempotent(task_id: str) -> None:
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
     """Manage process-local IP geolocation background services for app lifecycle."""
-    configure_backend_logging()
     runner = get_background_task_runner()
     runner.start_background_task_runner()
 

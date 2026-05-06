@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api import router as api_router
 from services.background_task_runner.ip_geolocation_lifespan import app_lifespan
+from services.logging import configure_backend_logging
 from services.sslCert import ensure_ssl_files
 
 
@@ -158,6 +159,7 @@ def _start_frontend_dev_server(frontend_dev_url: str, frontend_dir: Path) -> sub
 
 def create_app(frontend_mode: str | None = None, frontend_dev_url: str | None = None) -> FastAPI:
     """Create and configure the FastAPI application."""
+    configure_backend_logging()
     app = FastAPI(title="BGPX Backend", version="0.1.0", lifespan=app_lifespan)
     app.include_router(api_router, prefix="/api")
 

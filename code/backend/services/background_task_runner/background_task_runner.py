@@ -15,29 +15,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import inspect
-import logging
-import os
 import random
 from threading import RLock
 import time
 
 from models.background_task_runner import BackgroundTaskDefinition, BackgroundTaskStatus
-
-
-_VERBOSE_ENV = "BGPX_VERBOSE"
-_TRUTHY_VALUES = {"1", "true", "yes", "on"}
-_logger = logging.getLogger("bgpx.runner.background_task_runner")
-
-_IP_GEO_TASK_IDS = {
-    "ip_geolocation_bootstrap_once",
-    "ip_geolocation_ipinfo_gz_downloader",
-    "ip_geolocation_data_refresh",
-}
-
-
-def _is_verbose_enabled() -> bool:
-    """Return whether verbose logging is enabled from runtime environment."""
-    return os.getenv(_VERBOSE_ENV, "0").strip().lower() in _TRUTHY_VALUES
 
 
 @dataclass
@@ -356,12 +338,6 @@ class BackgroundTaskRunner:
                 state.status,
                 skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
             )
-            if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
-                _logger.info(
-                    "BG runner skip task_id=%s reason=resource_group_active active_task_id=%s",
-                    task_id,
-                    resource_group.active_task_id,
-                )
             return True
 
         if resource_group.next_task_id_turn is not None and resource_group.next_task_id_turn != task_id:
@@ -369,20 +345,9 @@ class BackgroundTaskRunner:
                 state.status,
                 skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
             )
-            if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
-                _logger.info(
-                    "BG runner skip task_id=%s reason=resource_group_sequence_turn expected_task_id=%s",
-                    task_id,
-                    resource_group.next_task_id_turn,
-                )
             return True
 
         if self._resource_group_preceding_task_is_eligible(resource_group, task_id):
-            if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
-                _logger.info(
-                    "BG runner skip task_id=%s reason=preceding_task_eligible",
-                    task_id,
-                )
             return True
 
         return False
@@ -423,11 +388,6 @@ class BackgroundTaskRunner:
                     state.status,
                     skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
                 )
-                if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
-                    _logger.info(
-                        "BG runner skip task_id=%s reason=run_in_progress",
-                        task_id,
-                    )
                 return
 
             self._set_task_as_running_for_next_run(task_id, state)
