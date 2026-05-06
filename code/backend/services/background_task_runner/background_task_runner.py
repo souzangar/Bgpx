@@ -237,6 +237,53 @@ class BackgroundTaskRunner:
                     if state.loop_handle is current_task:
                         state.loop_handle = None
 
+    def _is_task_eligible_for_scheduling(self, state: _RegisteredTaskState) -> bool:
+        """Return whether baseline lifecycle/backoff checks allow scheduling."""
+        if not self._runner_started or not state.status.is_running:
+            return False
+
+        if time.monotonic() < state.next_eligible_run_at_monotonic:
+            return False
+
+        return True
+
+    def _is_resource_group_blocking_run(self, task_id: str, state: _RegisteredTaskState) -> bool:
+        """Return whether resource-group constraints currently block this run."""
+        resource_key = state.task_definition.resource_key
+        if resource_key is None:
+            return False
+
+        resource_group = self._resource_groups.get(resource_key)
+        if resource_group is None:
+            return False
+
+        if resource_group.active_task_id is not None and resource_group.active_task_id != task_id:
+            state.status = replace(
+                state.status,
+                skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
+            )
+            return True
+
+        if self._resource_group_preceding_task_is_eligible(resource_group, task_id):
+            return True
+
+        return False
+
+    def _set_task_as_running_for_next_run(self, task_id: str, state: _RegisteredTaskState) -> None:
+        """Mark task state as running for a newly scheduled run."""
+        state.run_in_progress = True
+        resource_key = state.task_definition.resource_key
+        if resource_key is not None:
+            resource_group = self._resource_groups.get(resource_key)
+            if resource_group is not None:
+                resource_group.active_task_id = task_id
+
+        state.status = replace(
+            state.status,
+            last_run_started_at=datetime.now(UTC),
+            total_runs=state.status.total_runs + 1,
+        )
+
     def _schedule_task_run_if_possible(self, task_id: str) -> None:
         """Schedule one task run while enforcing overlap policy."""
         should_spawn_run_task = False
@@ -246,28 +293,11 @@ class BackgroundTaskRunner:
             if state is None:
                 return
 
-            if not self._runner_started or not state.status.is_running:
+            if not self._is_task_eligible_for_scheduling(state):
                 return
 
-            if time.monotonic() < state.next_eligible_run_at_monotonic:
+            if self._is_resource_group_blocking_run(task_id, state):
                 return
-
-            resource_key = state.task_definition.resource_key
-            if resource_key is not None:
-                resource_group = self._resource_groups.get(resource_key)
-                if resource_group is not None:
-                    if (
-                        resource_group.active_task_id is not None
-                        and resource_group.active_task_id != task_id
-                    ):
-                        state.status = replace(
-                            state.status,
-                            skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
-                        )
-                        return
-
-                    if self._resource_group_preceding_task_is_eligible(resource_group, task_id):
-                        return
 
             if state.run_in_progress:
                 # Step 5 fully implements SKIP_IF_RUNNING. Other policies remain
@@ -278,16 +308,7 @@ class BackgroundTaskRunner:
                 )
                 return
 
-            state.run_in_progress = True
-            if resource_key is not None:
-                resource_group = self._resource_groups.get(resource_key)
-                if resource_group is not None:
-                    resource_group.active_task_id = task_id
-            state.status = replace(
-                state.status,
-                last_run_started_at=datetime.now(UTC),
-                total_runs=state.status.total_runs + 1,
-            )
+            self._set_task_as_running_for_next_run(task_id, state)
             should_spawn_run_task = True
 
         if not should_spawn_run_task:
@@ -307,26 +328,16 @@ class BackgroundTaskRunner:
 
     async def _execute_registered_task_run(self, task_id: str) -> None:
         """Execute one task run and release per-task running guard."""
-        run_callable = None
-
-        with self._state_lock:
-            state = self._registry.get(task_id)
-            if state is None:
-                return
-            run_callable = state.task_definition.run_once
+        run_callable = self._get_registered_run_callable(task_id)
+        if run_callable is None:
+            return
 
         succeeded = False
         error_message: str | None = None
         was_cancelled = False
 
         try:
-            if inspect.iscoroutinefunction(run_callable):
-                await run_callable()
-            else:
-                event_loop = asyncio.get_running_loop()
-                with self._state_lock:
-                    sync_executor = self._sync_executor
-                await event_loop.run_in_executor(sync_executor, run_callable)
+            await self._invoke_registered_run_callable(run_callable)
             succeeded = True
         except asyncio.CancelledError:
             was_cancelled = True
@@ -334,45 +345,128 @@ class BackgroundTaskRunner:
         except Exception as exc:  # pragma: no cover - step 6 will formalize policy
             error_message = str(exc) or exc.__class__.__name__
         finally:
-            with self._state_lock:
-                state = self._registry.get(task_id)
-                if state is not None:
-                    if state.run_handle is asyncio.current_task():
-                        state.run_handle = None
+            self._finalize_registered_task_run(
+                task_id=task_id,
+                succeeded=succeeded,
+                error_message=error_message,
+                was_cancelled=was_cancelled,
+            )
 
-                    state.run_in_progress = False
-                    resource_key = state.task_definition.resource_key
-                    if resource_key is not None:
-                        resource_group = self._resource_groups.get(resource_key)
-                        if (
-                            resource_group is not None
-                            and resource_group.active_task_id == task_id
-                        ):
-                            resource_group.active_task_id = None
+    def _get_registered_run_callable(self, task_id: str):
+        """Return run callable for registered task, or ``None`` if task disappeared."""
+        with self._state_lock:
+            state = self._registry.get(task_id)
+            if state is None:
+                return None
+            return state.task_definition.run_once
 
-                    if not was_cancelled:
-                        if succeeded:
-                            state.status = replace(
-                                state.status,
-                                last_run_succeeded_at=datetime.now(UTC),
-                                last_error_message=None,
-                                consecutive_failure_count=0,
-                            )
-                            state.next_eligible_run_at_monotonic = 0.0
-                        elif error_message is not None:
-                            next_failure_count = state.status.consecutive_failure_count + 1
-                            backoff_delay_seconds = self._compute_backoff_delay_seconds(
-                                state.task_definition,
-                                next_failure_count,
-                            )
-                            state.next_eligible_run_at_monotonic = (
-                                time.monotonic() + backoff_delay_seconds
-                            )
-                            state.status = replace(
-                                state.status,
-                                last_error_message=error_message,
-                                consecutive_failure_count=next_failure_count,
-                            )
+    async def _invoke_registered_run_callable(self, run_callable) -> None:
+        """Invoke task callable using async path or executor for sync callables."""
+        if inspect.iscoroutinefunction(run_callable):
+            await run_callable()
+            return
+
+        event_loop = asyncio.get_running_loop()
+        with self._state_lock:
+            sync_executor = self._sync_executor
+        await event_loop.run_in_executor(sync_executor, run_callable)
+
+    def _release_runtime_guards_after_run(
+        self,
+        task_id: str,
+        state: _RegisteredTaskState,
+    ) -> None:
+        """Release run/resource guard markers once a run attempt finishes."""
+        if state.run_handle is asyncio.current_task():
+            state.run_handle = None
+
+        state.run_in_progress = False
+        resource_key = state.task_definition.resource_key
+        if resource_key is None:
+            return
+
+        resource_group = self._resource_groups.get(resource_key)
+        if resource_group is not None and resource_group.active_task_id == task_id:
+            resource_group.active_task_id = None
+
+    def _apply_success_status_after_run(self, state: _RegisteredTaskState) -> None:
+        """Apply status mutations for successful run completion."""
+        state.status = replace(
+            state.status,
+            last_run_succeeded_at=datetime.now(UTC),
+            last_error_message=None,
+            consecutive_failure_count=0,
+        )
+        state.next_eligible_run_at_monotonic = 0.0
+
+    def _apply_failure_status_after_run(
+        self,
+        state: _RegisteredTaskState,
+        error_message: str,
+    ) -> None:
+        """Apply status mutations/backoff for failed run completion."""
+        next_failure_count = state.status.consecutive_failure_count + 1
+        backoff_delay_seconds = self._compute_backoff_delay_seconds(
+            state.task_definition,
+            next_failure_count,
+        )
+        state.next_eligible_run_at_monotonic = time.monotonic() + backoff_delay_seconds
+        state.status = replace(
+            state.status,
+            last_error_message=error_message,
+            consecutive_failure_count=next_failure_count,
+        )
+
+    def _reset_task_runtime_markers_on_runner_stop(
+        self,
+        state: _RegisteredTaskState,
+        tasks_to_cancel: list[asyncio.Task[None]],
+    ) -> None:
+        """Reset one task runtime markers and collect handles to cancel."""
+        state.run_in_progress = False
+        state.next_eligible_run_at_monotonic = 0.0
+
+        resource_key = state.task_definition.resource_key
+        if resource_key is not None:
+            resource_group = self._resource_groups.get(resource_key)
+            if resource_group is not None:
+                resource_group.active_task_id = None
+
+        if state.loop_handle is not None:
+            tasks_to_cancel.append(state.loop_handle)
+            state.loop_handle = None
+
+        if state.run_handle is not None:
+            tasks_to_cancel.append(state.run_handle)
+            state.run_handle = None
+
+        if state.status.is_running:
+            state.status = replace(state.status, is_running=False)
+
+    def _finalize_registered_task_run(
+        self,
+        task_id: str,
+        succeeded: bool,
+        error_message: str | None,
+        was_cancelled: bool,
+    ) -> None:
+        """Finalize run attempt by releasing guards and applying status policy."""
+        with self._state_lock:
+            state = self._registry.get(task_id)
+            if state is None:
+                return
+
+            self._release_runtime_guards_after_run(task_id, state)
+
+            if was_cancelled:
+                return
+
+            if succeeded:
+                self._apply_success_status_after_run(state)
+                return
+
+            if error_message is not None:
+                self._apply_failure_status_after_run(state, error_message)
 
     def start_background_task_runner(self) -> None:
         """Start runner lifecycle idempotently."""
@@ -401,23 +495,7 @@ class BackgroundTaskRunner:
             self._sync_executor = None
 
             for state in self._registry.values():
-                state.run_in_progress = False
-                state.next_eligible_run_at_monotonic = 0.0
-                resource_key = state.task_definition.resource_key
-                if resource_key is not None:
-                    resource_group = self._resource_groups.get(resource_key)
-                    if resource_group is not None:
-                        resource_group.active_task_id = None
-                if state.loop_handle is not None:
-                    tasks_to_cancel.append(state.loop_handle)
-                    state.loop_handle = None
-
-                if state.run_handle is not None:
-                    tasks_to_cancel.append(state.run_handle)
-                    state.run_handle = None
-
-                if state.status.is_running:
-                    state.status = replace(state.status, is_running=False)
+                self._reset_task_runtime_markers_on_runner_stop(state, tasks_to_cancel)
 
         for task in tasks_to_cancel:
             if not task.done():

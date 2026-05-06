@@ -123,7 +123,7 @@ def test_refresher_failure_does_not_crash_and_tracks_error() -> None:
 
 
 def test_refresher_verbose_logs_only_when_refresh_triggered(monkeypatch, caplog) -> None:
-    """Verbose mode should log only when a source change triggers refresh/update."""
+    """Verbose mode should include refresh logs and unchanged-cycle diagnostics."""
     published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
     monkeypatch.setenv("BGPX_VERBOSE", "1")
 
@@ -148,10 +148,12 @@ def test_refresher_verbose_logs_only_when_refresh_triggered(monkeypatch, caplog)
 
     assert len(published) == 1
     messages = [record.getMessage() for record in caplog.records]
+    assert any("refresh poll tick" in message for message in messages)
     assert any("source change detected" in message for message in messages)
     assert any("refresh chunk published" in message for message in messages)
     assert any("snapshot refresh succeeded" in message for message in messages)
-    assert len(messages) == 3
+    assert any("poll tick unchanged" in message for message in messages)
+    assert len(messages) == 6
 
 
 def test_refresher_verbose_logs_each_chunk_publish(monkeypatch, caplog) -> None:
@@ -198,6 +200,37 @@ def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) ->
 
     assert len(published) == 1
     assert caplog.records == []
+
+
+def test_refresher_verbose_logs_each_poll_tick_when_unchanged(monkeypatch, caplog) -> None:
+    """Verbose mode should log each poll tick even when source fingerprint is unchanged."""
+    monkeypatch.setenv("BGPX_VERBOSE", "1")
+
+    fingerprints = [
+        _FakeStat(10, 1000),
+        _FakeStat(10, 1000),
+    ]
+
+    def _stat_func(_path: object) -> _FakeStat:
+        return fingerprints.pop(0)
+
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda _result, _metadata: None,
+        adapter=_FakeAdapter(IpGeolocationReadResult(records=[], total_lines=1, malformed_lines=0)),
+        stat_func=_stat_func,
+        sleep_func=lambda _seconds: None,
+    )
+
+    with caplog.at_level(logging.INFO):
+        refresher.run_once()
+        refresher.run_once()
+
+    messages = [record.getMessage() for record in caplog.records]
+    tick_messages = [message for message in messages if "refresh poll tick" in message]
+    unchanged_messages = [message for message in messages if "poll tick unchanged" in message]
+
+    assert len(tick_messages) == 3
+    assert len(unchanged_messages) == 1
 
 
 def test_refresher_progressively_publishes_chunked_results() -> None:

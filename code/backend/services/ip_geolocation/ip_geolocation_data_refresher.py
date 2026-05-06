@@ -84,20 +84,72 @@ class IpGeolocationDataRefresher:
     def run_once(self) -> None:
         """Run one poll cycle and publish when source change is detected."""
         current = self._read_source_fingerprint()
+        self._log_poll_tick(current)
+        if self._handle_missing_source(current):
+            return
         if current is None:
             return
 
-        if self._last_fingerprint is not None and current == self._last_fingerprint:
+        if self._is_unchanged(current):
             return
 
-        if self._last_fingerprint is not None and self._debounce_seconds > 0:
-            self._sleep_func(self._debounce_seconds)
-            confirmed = self._read_source_fingerprint()
-            if confirmed is None or confirmed == self._last_fingerprint:
-                return
-            current = confirmed
+        confirmed = self._confirm_change_after_debounce(current)
+        if confirmed is None:
+            return
 
-        self._reload_and_publish(current)
+        self._reload_and_publish(confirmed)
+
+    def _log_poll_tick(self, current: SourceFingerprint | None) -> None:
+        if not self._verbose:
+            return
+
+        logger.info(
+            "IP geolocation refresh poll tick "
+            "(path=%s, current_inode=%s, current_mtime_ns=%s, last_inode=%s, last_mtime_ns=%s)",
+            self._source_path,
+            None if current is None else current.inode,
+            None if current is None else current.mtime_ns,
+            None if self._last_fingerprint is None else self._last_fingerprint.inode,
+            None if self._last_fingerprint is None else self._last_fingerprint.mtime_ns,
+        )
+
+    def _handle_missing_source(self, current: SourceFingerprint | None) -> bool:
+        if current is not None:
+            return False
+
+        if self._verbose:
+            logger.info(
+                "IP geolocation refresh poll tick skipped; source missing (path=%s)",
+                self._source_path,
+            )
+        return True
+
+    def _is_unchanged(self, current: SourceFingerprint) -> bool:
+        if self._last_fingerprint is None or current != self._last_fingerprint:
+            return False
+
+        if self._verbose:
+            logger.info(
+                "IP geolocation refresh poll tick unchanged; no refresh needed "
+                "(inode=%s, mtime_ns=%s)",
+                current.inode,
+                current.mtime_ns,
+            )
+        return True
+
+    def _confirm_change_after_debounce(
+        self,
+        current: SourceFingerprint,
+    ) -> SourceFingerprint | None:
+        if self._last_fingerprint is None or self._debounce_seconds <= 0:
+            return current
+
+        self._sleep_func(self._debounce_seconds)
+        confirmed = self._read_source_fingerprint()
+        if confirmed is None or confirmed == self._last_fingerprint:
+            return None
+
+        return confirmed
 
     def _reload_and_publish(self, next_fingerprint: SourceFingerprint) -> None:
         """Rebuild dataset snapshot and publish only on successful parse/build."""
@@ -116,110 +168,22 @@ class IpGeolocationDataRefresher:
 
         try:
             read_result = self._adapter.read_records()
-            if (
-                self._is_snapshot_equivalent is not None
-                and self._last_fingerprint is not None
-                and self._is_snapshot_equivalent(read_result)
-            ):
-                self._last_fingerprint = next_fingerprint
-                self.last_refresh_error = None
-                self.last_refresh_succeeded_at = datetime.now(UTC)
-                self.refresh_success_count += 1
-                if self._verbose:
-                    logger.info(
-                        "IP geolocation refresh skipped; source content unchanged "
-                        "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                        read_result.total_lines,
-                        read_result.malformed_lines,
-                        self.refresh_success_count,
-                    )
+            if self._try_skip_for_equivalent_snapshot(read_result, next_fingerprint):
                 return
 
-            if self._apply_snapshot_delta is not None and self._last_fingerprint is not None:
-                delta_metadata = {
-                    "source_fingerprint": next_fingerprint,
-                    "total_lines": read_result.total_lines,
-                    "malformed_lines": read_result.malformed_lines,
-                    "is_final_chunk": True,
-                }
-                delta_applied = self._apply_snapshot_delta(read_result, delta_metadata)
-                if delta_applied:
-                    self._last_fingerprint = next_fingerprint
-                    self.last_refresh_error = None
-                    self.last_refresh_succeeded_at = datetime.now(UTC)
-                    self.refresh_success_count += 1
-                    if self._verbose:
-                        logger.info(
-                            "IP geolocation snapshot refresh applied as delta "
-                            "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                            read_result.total_lines,
-                            read_result.malformed_lines,
-                            self.refresh_success_count,
-                        )
-                    return
+            if self._try_apply_delta(read_result, next_fingerprint):
+                return
 
-            last_read_result: IpGeolocationReadResult | None = None
-
-            iter_reader = getattr(self._adapter, "iter_read_results", None)
-            if callable(iter_reader):
-                chunk_results = cast(Iterator[IpGeolocationReadResult], iter_reader(chunk_size=self._publish_chunk_size))
-                chunk_index = 0
-                current_chunk = next(chunk_results, None)
-                while current_chunk is not None:
-                    next_chunk = next(chunk_results, None)
-                    chunk_index += 1
-                    is_final_chunk = next_chunk is None
-                    metadata = {
-                        "source_fingerprint": next_fingerprint,
-                        "total_lines": current_chunk.total_lines,
-                        "malformed_lines": current_chunk.malformed_lines,
-                        "is_final_chunk": is_final_chunk,
-                    }
-                    self._publish_snapshot(current_chunk, metadata)
-                    if self._verbose:
-                        secs_elapsed = time.monotonic() - refresh_started_at
-                        logger.info(
-                            "IP geolocation refresh chunk published "
-                            "(chunk=%s, is_final_chunk=%s, total_lines=%s, loaded_records=%s, malformed_lines=%s, secs_elapsed=%.2f)",
-                            chunk_index,
-                            is_final_chunk,
-                            current_chunk.total_lines,
-                            len(current_chunk.records),
-                            current_chunk.malformed_lines,
-                            secs_elapsed,
-                        )
-                    last_read_result = current_chunk
-                    current_chunk = next_chunk
-            else:
-                metadata = {
-                    "source_fingerprint": next_fingerprint,
-                    "total_lines": read_result.total_lines,
-                    "malformed_lines": read_result.malformed_lines,
-                    "is_final_chunk": True,
-                }
-                self._publish_snapshot(read_result, metadata)
-                if self._verbose:
-                    secs_elapsed = time.monotonic() - refresh_started_at
-                    logger.info(
-                        "IP geolocation refresh chunk published "
-                        "(chunk=%s/%s, is_final_chunk=%s, total_lines=%s, loaded_records=%s, malformed_lines=%s, secs_elapsed=%.2f)",
-                        1,
-                        1,
-                        True,
-                        read_result.total_lines,
-                        len(read_result.records),
-                        read_result.malformed_lines,
-                        secs_elapsed,
-                    )
-                last_read_result = read_result
+            last_read_result = self._publish_refresh_result(
+                read_result,
+                next_fingerprint,
+                refresh_started_at,
+            )
 
             if last_read_result is None:
                 return
 
-            self._last_fingerprint = next_fingerprint
-            self.last_refresh_error = None
-            self.last_refresh_succeeded_at = datetime.now(UTC)
-            self.refresh_success_count += 1
+            self._mark_refresh_success(next_fingerprint)
             if self._verbose:
                 logger.info(
                     "IP geolocation snapshot refresh succeeded "
@@ -237,6 +201,159 @@ class IpGeolocationDataRefresher:
                     self.refresh_failure_count,
                     self.last_refresh_error,
                 )
+
+    def _try_skip_for_equivalent_snapshot(
+        self,
+        read_result: IpGeolocationReadResult,
+        next_fingerprint: SourceFingerprint,
+    ) -> bool:
+        if self._is_snapshot_equivalent is None or self._last_fingerprint is None:
+            return False
+        if not self._is_snapshot_equivalent(read_result):
+            return False
+
+        self._mark_refresh_success(next_fingerprint)
+        if self._verbose:
+            logger.info(
+                "IP geolocation refresh skipped; source content unchanged "
+                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+                read_result.total_lines,
+                read_result.malformed_lines,
+                self.refresh_success_count,
+            )
+        return True
+
+    def _try_apply_delta(
+        self,
+        read_result: IpGeolocationReadResult,
+        next_fingerprint: SourceFingerprint,
+    ) -> bool:
+        if self._apply_snapshot_delta is None or self._last_fingerprint is None:
+            return False
+
+        delta_metadata = self._build_publish_metadata(read_result, next_fingerprint, is_final_chunk=True)
+        if not self._apply_snapshot_delta(read_result, delta_metadata):
+            return False
+
+        self._mark_refresh_success(next_fingerprint)
+        if self._verbose:
+            logger.info(
+                "IP geolocation snapshot refresh applied as delta "
+                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+                read_result.total_lines,
+                read_result.malformed_lines,
+                self.refresh_success_count,
+            )
+        return True
+
+    def _publish_refresh_result(
+        self,
+        read_result: IpGeolocationReadResult,
+        next_fingerprint: SourceFingerprint,
+        refresh_started_at: float,
+    ) -> IpGeolocationReadResult | None:
+        iter_reader = getattr(self._adapter, "iter_read_results", None)
+        if callable(iter_reader):
+            return self._publish_chunked_results(iter_reader, next_fingerprint, refresh_started_at)
+
+        self._publish_single_result(read_result, next_fingerprint, refresh_started_at)
+        return read_result
+
+    def _publish_chunked_results(
+        self,
+        iter_reader: Callable[..., object],
+        next_fingerprint: SourceFingerprint,
+        refresh_started_at: float,
+    ) -> IpGeolocationReadResult | None:
+        chunk_results = cast(
+            Iterator[IpGeolocationReadResult],
+            iter_reader(chunk_size=self._publish_chunk_size),
+        )
+        chunk_index = 0
+        last_read_result: IpGeolocationReadResult | None = None
+        current_chunk = next(chunk_results, None)
+
+        while current_chunk is not None:
+            next_chunk = next(chunk_results, None)
+            chunk_index += 1
+            is_final_chunk = next_chunk is None
+            metadata = self._build_publish_metadata(
+                current_chunk,
+                next_fingerprint,
+                is_final_chunk=is_final_chunk,
+            )
+            self._publish_snapshot(current_chunk, metadata)
+            self._log_chunk_publish(
+                chunk_index=chunk_index,
+                is_final_chunk=is_final_chunk,
+                read_result=current_chunk,
+                refresh_started_at=refresh_started_at,
+            )
+            last_read_result = current_chunk
+            current_chunk = next_chunk
+
+        return last_read_result
+
+    def _publish_single_result(
+        self,
+        read_result: IpGeolocationReadResult,
+        next_fingerprint: SourceFingerprint,
+        refresh_started_at: float,
+    ) -> None:
+        metadata = self._build_publish_metadata(read_result, next_fingerprint, is_final_chunk=True)
+        self._publish_snapshot(read_result, metadata)
+        self._log_chunk_publish(
+            chunk_index=1,
+            is_final_chunk=True,
+            read_result=read_result,
+            refresh_started_at=refresh_started_at,
+            chunk_total=1,
+        )
+
+    def _build_publish_metadata(
+        self,
+        read_result: IpGeolocationReadResult,
+        next_fingerprint: SourceFingerprint,
+        *,
+        is_final_chunk: bool,
+    ) -> dict[str, object]:
+        return {
+            "source_fingerprint": next_fingerprint,
+            "total_lines": read_result.total_lines,
+            "malformed_lines": read_result.malformed_lines,
+            "is_final_chunk": is_final_chunk,
+        }
+
+    def _log_chunk_publish(
+        self,
+        *,
+        chunk_index: int,
+        is_final_chunk: bool,
+        read_result: IpGeolocationReadResult,
+        refresh_started_at: float,
+        chunk_total: int | None = None,
+    ) -> None:
+        if not self._verbose:
+            return
+
+        secs_elapsed = time.monotonic() - refresh_started_at
+        chunk_value = chunk_index if chunk_total is None else f"{chunk_index}/{chunk_total}"
+        logger.info(
+            "IP geolocation refresh chunk published "
+            "(chunk=%s, is_final_chunk=%s, total_lines=%s, loaded_records=%s, malformed_lines=%s, secs_elapsed=%.2f)",
+            chunk_value,
+            is_final_chunk,
+            read_result.total_lines,
+            len(read_result.records),
+            read_result.malformed_lines,
+            secs_elapsed,
+        )
+
+    def _mark_refresh_success(self, next_fingerprint: SourceFingerprint) -> None:
+        self._last_fingerprint = next_fingerprint
+        self.last_refresh_error = None
+        self.last_refresh_succeeded_at = datetime.now(UTC)
+        self.refresh_success_count += 1
 
     def _read_source_fingerprint(self) -> SourceFingerprint | None:
         """Read source metadata fingerprint for change detection."""

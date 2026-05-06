@@ -67,13 +67,45 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             status = runner.get_background_task_status("ip_geolocation_data_refresh")
             assert status.is_running is True
 
-        with TestClient(app):
-            pass
+        with TestClient(app) as client:
+            response = client.get("/api/health")
+            assert response.status_code == 200
 
         with pytest.raises(KeyError):
             runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
 
         with pytest.raises(KeyError):
             runner.get_background_task_status("ip_geolocation_data_refresh")
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_app_lifespan_bootstrap_stops_after_first_success() -> None:
+    """One-time bootstrap task should stop so sequenced tasks can continue running."""
+    reset_background_task_runner_for_tests()
+
+    try:
+        runner = get_background_task_runner()
+        app = create_app()
+
+        with TestClient(app) as client:
+            response = client.get("/api/health")
+            assert response.status_code == 200
+
+            # Give background loops a brief chance to execute at least once.
+            import time
+
+            time.sleep(0.2)
+
+            bootstrap_status = runner.get_background_task_status("ip_geolocation_bootstrap_once")
+            assert bootstrap_status.task_id == "ip_geolocation_bootstrap_once"
+            assert bootstrap_status.is_running is False
+            assert bootstrap_status.total_runs >= 1
+
+            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            assert gz_watch_status.is_running is True
+
+            refresh_status = runner.get_background_task_status("ip_geolocation_data_refresh")
+            assert refresh_status.is_running is True
     finally:
         reset_background_task_runner_for_tests()

@@ -197,6 +197,10 @@ async def _app_lifespan(_app: FastAPI):
         ip_geolocation_downloader.run_once()
         ip_geolocation_refresher.run_once()
         bootstrap_completed = True
+        # Bootstrap is a one-time warm-up task. Stop it after first success so
+        # lower-priority tasks in the same resource group are not continuously
+        # gated by resource-sequence ordering.
+        runner.stop_background_task(IP_GEO_BOOTSTRAP_TASK_ID)
 
     ip_geo_bootstrap_task = BackgroundTaskDefinition(
         task_id=IP_GEO_BOOTSTRAP_TASK_ID,
