@@ -29,6 +29,10 @@ def _write_gz(path: Path, content: str) -> None:
         handle.write(content.encode("utf-8"))
 
 
+def _raise_file_not_found(_path: object) -> _FakeStat:
+    raise FileNotFoundError()
+
+
 def test_downloader_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
     """Second run with unchanged .gz fingerprint should not trigger sync."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
@@ -115,7 +119,7 @@ def test_downloader_handles_missing_gz_as_noop(tmp_path: Path) -> None:
         gz_source_path=gz_path,
         working_dataset_path=tmp_path / "ipinfo_lite.json",
         temp_dataset_path=tmp_path / "ipinfo_lite.tmp.json",
-        stat_func=lambda _path: (_ for _ in ()).throw(FileNotFoundError()),
+        stat_func=_raise_file_not_found,
         sleep_func=lambda _seconds: None,
     )
 

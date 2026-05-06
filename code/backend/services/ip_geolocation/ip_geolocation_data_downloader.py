@@ -1,4 +1,26 @@
-"""Dedicated .gz watcher/downloader-style service for IP geolocation dataset replacement."""
+"""IP geolocation downloader with event-based, JSON-configured logging.
+
+Logging model (human + AI agent guidance)
+-----------------------------------------
+- This module emits logs through `event_logger` (see `get_component_event_logger`).
+- Runtime logging behavior is configured in:
+  `code/backend/data/configs/logging_config.json`
+- Component key for this file: `ip_geo_downloader`
+
+Important rules when editing/adding logs
+---------------------------------------
+1) Every `event_logger.log("<event_id>", ...)` / `event_logger.exception("<event_id>", ...)`
+   should have a matching event entry in `logging_config.json` under:
+   `components.ip_geo_downloader.events`.
+2) If you add a new event ID in code, update JSON in the same change.
+3) Keep event IDs stable and descriptive (for example: `source_change_detected`, `sync_failed`).
+
+Hot-reload behavior
+-------------------
+- Event-level config is reloaded in-process when `logging_config.json` changes.
+- No backend process restart is required.
+- New JSON values apply to the next logging cycle/event emission.
+"""
 
 from __future__ import annotations
 
@@ -6,18 +28,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import filecmp
 import gzip
-import logging
 import os
 from pathlib import Path
 import shutil
 import time
 from typing import Any, Callable
 
+from services.logging.logging_service import get_component_event_logger
+
 
 GZ_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json.gz")
 WORKING_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json")
 TEMP_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.tmp.json")
-logger = logging.getLogger("bgpx.tasks.ip_geo.downloader")
+event_logger = get_component_event_logger("ip_geo_downloader", "bgpx.tasks.ip_geo.downloader")
 
 
 @dataclass(frozen=True)
@@ -58,14 +81,16 @@ class IpGeolocationDataDownloader:
 
     def run_once(self) -> None:
         """Run one poll cycle and sync working dataset when .gz source changes."""
-        logger.debug("IPinfo .gz downloader poll tick started (path=%s)", self._gz_source_path)
+        event_logger.log("poll_started", "DEBUG", "IPinfo .gz downloader poll tick started (path=%s)", self._gz_source_path)
         current = self._read_source_fingerprint()
         if current is None:
-            logger.debug("IPinfo .gz downloader poll tick skipped; source missing")
+            event_logger.log("source_missing", "DEBUG", "IPinfo .gz downloader poll tick skipped; source missing")
             return
 
         if self._last_fingerprint is not None and current == self._last_fingerprint:
-            logger.debug(
+            event_logger.log(
+                "poll_unchanged",
+                "DEBUG",
                 "IPinfo .gz downloader poll tick unchanged (inode=%s, mtime_ns=%s)",
                 current.inode,
                 current.mtime_ns,
@@ -76,11 +101,17 @@ class IpGeolocationDataDownloader:
             self._sleep_func(self._debounce_seconds)
             confirmed = self._read_source_fingerprint()
             if confirmed is None or confirmed == self._last_fingerprint:
-                logger.debug("IPinfo .gz downloader poll tick skipped after debounce confirmation")
+                event_logger.log(
+                    "debounce_skipped",
+                    "DEBUG",
+                    "IPinfo .gz downloader poll tick skipped after debounce confirmation",
+                )
                 return
             current = confirmed
 
-        logger.info(
+        event_logger.log(
+            "source_change_detected",
+            "INFO",
             "IPinfo .gz downloader source change detected (path=%s, inode=%s, mtime_ns=%s)",
             self._gz_source_path,
             current.inode,
@@ -98,13 +129,19 @@ class IpGeolocationDataDownloader:
             should_replace = self._should_replace_working_dataset()
 
             if should_replace:
-                logger.info(
+                event_logger.log(
+                    "replace_working_dataset",
+                    "INFO",
                     "IPinfo .gz downloader replacing working dataset (working=%s)",
                     self._working_dataset_path,
                 )
                 self._replace_working_dataset_from_temp()
             else:
-                logger.debug("IPinfo .gz downloader extracted content unchanged; keeping working dataset")
+                event_logger.log(
+                    "keep_working_dataset",
+                    "DEBUG",
+                    "IPinfo .gz downloader extracted content unchanged; keeping working dataset",
+                )
 
             self._last_fingerprint = next_fingerprint
             self.last_sync_error = None
@@ -113,7 +150,8 @@ class IpGeolocationDataDownloader:
         except Exception as exc:
             self.last_sync_error = str(exc) or exc.__class__.__name__
             self.sync_failure_count += 1
-            logger.exception(
+            event_logger.exception(
+                "sync_failed",
                 "IPinfo .gz downloader sync failed (failure_count=%s): %s",
                 self.sync_failure_count,
                 self.last_sync_error,

@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "standard": {
+      "format": "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+    }
+  },
+  "handlers": {
+    "console": {
+      "class": "logging.StreamHandler",
+      "formatter": "standard",
+      "level": "NOTSET"
+    }
+  },
+  "root": {
+    "handlers": [
+      "console"
+    ],
+    "level": "WARNING"
+  },
+  "loggers": {
+    "uvicorn": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "uvicorn.error": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "uvicorn.access": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "bgpx": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "bgpx.tasks.ip_geo.refresher": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "bgpx.tasks.ip_geo.downloader": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "bgpx.runner.background_task_runner": {
+      "level": "WARNING",
+      "propagate": true
+    }
+  },
+  "components": {
+    "ip_geo_refresher": {
+      "base_logger": "bgpx.tasks.ip_geo.refresher",
+      "enabled": true,
+      "default_level": "INFO",
+      "events": {
+        "poll_started": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "source_missing": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "source_fingerprint_unavailable": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "poll_unchanged": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "debounce_skipped": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "source_change_detected": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "refresh_succeeded": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "refresh_failed": {
+          "enabled": true,
+          "level": "ERROR"
+        },
+        "refresh_skipped_equivalent": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "refresh_applied_delta": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "chunk_published": {
+          "enabled": true,
+          "level": "DEBUG"
+        }
+      }
+    },
+    "ip_geo_downloader": {
+      "base_logger": "bgpx.tasks.ip_geo.downloader",
+      "enabled": true,
+      "default_level": "INFO",
+      "events": {
+        "poll_started": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "source_missing": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "poll_unchanged": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "debounce_skipped": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "source_change_detected": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "replace_working_dataset": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "keep_working_dataset": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "sync_failed": {
+          "enabled": true,
+          "level": "ERROR"
+        }
+      }
+    },
+    "background_task_runner": {
+      "base_logger": "bgpx.runner.background_task_runner",
+      "enabled": true,
+      "default_level": "INFO",
+      "events": {}
+    }
+  }
+}

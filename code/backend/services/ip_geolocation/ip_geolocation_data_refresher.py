@@ -1,10 +1,31 @@
-"""Domain refresher for IP geolocation source-change driven snapshot updates."""
+"""IP geolocation refresher with event-based, JSON-configured logging.
+
+Logging model (human + AI agent guidance)
+-----------------------------------------
+- This module emits logs through `event_logger` (see `get_component_event_logger`).
+- Runtime logging behavior is configured in:
+  `code/backend/data/configs/logging_config.json`
+- Component key for this file: `ip_geo_refresher`
+
+Important rules when editing/adding logs
+---------------------------------------
+1) Every `event_logger.log("<event_id>", ...)` / `event_logger.exception("<event_id>", ...)`
+   should have a matching event entry in `logging_config.json` under:
+   `components.ip_geo_refresher.events`.
+2) If you add a new event ID in code, update JSON in the same change.
+3) Keep event IDs stable and descriptive (for example: `poll_started`, `refresh_failed`).
+
+Hot-reload behavior
+-------------------
+- Event-level config is reloaded in-process when `logging_config.json` changes.
+- No backend process restart is required.
+- New JSON values apply to the next logging cycle/event emission.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import logging
 import os
 import time
 from collections.abc import Iterator
@@ -15,8 +36,9 @@ from infra.ip_geolocation import (
     IpGeolocationIpinfoJsonFileReaderAdapter,
     IpGeolocationReadResult,
 )
+from services.logging.logging_service import get_component_event_logger
 
-logger = logging.getLogger("bgpx.tasks.ip_geo.refresher")
+event_logger = get_component_event_logger("ip_geo_refresher", "bgpx.tasks.ip_geo.refresher")
 
 
 @dataclass(frozen=True)
@@ -74,17 +96,23 @@ class IpGeolocationDataRefresher:
 
     def run_once(self) -> None:
         """Run one poll cycle and publish when source change is detected."""
-        logger.debug("IP geolocation refresher poll tick started (path=%s)", self._source_path)
+        event_logger.log("poll_started", "DEBUG", "IP geolocation refresher poll tick started (path=%s)", self._source_path)
         current = self._read_source_fingerprint()
         if self._handle_missing_source(current):
-            logger.debug("IP geolocation refresher poll tick skipped; source missing")
+            event_logger.log("source_missing", "DEBUG", "IP geolocation refresher poll tick skipped; source missing")
             return
         if current is None:
-            logger.debug("IP geolocation refresher poll tick skipped; source fingerprint unavailable")
+            event_logger.log(
+                "source_fingerprint_unavailable",
+                "DEBUG",
+                "IP geolocation refresher poll tick skipped; source fingerprint unavailable",
+            )
             return
 
         if self._is_unchanged(current):
-            logger.debug(
+            event_logger.log(
+                "poll_unchanged",
+                "DEBUG",
                 "IP geolocation refresher poll tick unchanged (inode=%s, mtime_ns=%s)",
                 current.inode,
                 current.mtime_ns,
@@ -93,7 +121,11 @@ class IpGeolocationDataRefresher:
 
         confirmed = self._confirm_change_after_debounce(current)
         if confirmed is None:
-            logger.debug("IP geolocation refresher poll tick skipped after debounce confirmation")
+            event_logger.log(
+                "debounce_skipped",
+                "DEBUG",
+                "IP geolocation refresher poll tick skipped after debounce confirmation",
+            )
             return
 
         self._reload_and_publish(confirmed)
@@ -127,7 +159,9 @@ class IpGeolocationDataRefresher:
         refresh_started_at = time.monotonic()
         self.refresh_attempt_count += 1
         self.last_refresh_attempt_at = datetime.now(UTC)
-        logger.info(
+        event_logger.log(
+            "source_change_detected",
+            "INFO",
             "IP geolocation source change detected; refreshing snapshot "
             "(path=%s, inode=%s, mtime_ns=%s)",
             self._source_path,
@@ -153,7 +187,9 @@ class IpGeolocationDataRefresher:
                 return
 
             self._mark_refresh_success(next_fingerprint)
-            logger.info(
+            event_logger.log(
+                "refresh_succeeded",
+                "INFO",
                 "IP geolocation snapshot refresh succeeded "
                 "(total_lines=%s, malformed_lines=%s, success_count=%s)",
                 last_read_result.total_lines,
@@ -163,7 +199,8 @@ class IpGeolocationDataRefresher:
         except Exception as exc:
             self.last_refresh_error = str(exc) or exc.__class__.__name__
             self.refresh_failure_count += 1
-            logger.exception(
+            event_logger.exception(
+                "refresh_failed",
                 "IP geolocation snapshot refresh failed (failure_count=%s): %s",
                 self.refresh_failure_count,
                 self.last_refresh_error,
@@ -180,7 +217,9 @@ class IpGeolocationDataRefresher:
             return False
 
         self._mark_refresh_success(next_fingerprint)
-        logger.info(
+        event_logger.log(
+            "refresh_skipped_equivalent",
+            "INFO",
             "IP geolocation refresh skipped; source content unchanged "
             "(total_lines=%s, malformed_lines=%s, success_count=%s)",
             read_result.total_lines,
@@ -202,7 +241,9 @@ class IpGeolocationDataRefresher:
             return False
 
         self._mark_refresh_success(next_fingerprint)
-        logger.info(
+        event_logger.log(
+            "refresh_applied_delta",
+            "INFO",
             "IP geolocation snapshot refresh applied as delta "
             "(total_lines=%s, malformed_lines=%s, success_count=%s)",
             read_result.total_lines,
@@ -300,7 +341,9 @@ class IpGeolocationDataRefresher:
     ) -> None:
         secs_elapsed = time.monotonic() - refresh_started_at
         chunk_value = chunk_index if chunk_total is None else f"{chunk_index}/{chunk_total}"
-        logger.debug(
+        event_logger.log(
+            "chunk_published",
+            "DEBUG",
             "IP geolocation refresh chunk published "
             "(chunk=%s, is_final_chunk=%s, total_lines=%s, loaded_records=%s, malformed_lines=%s, secs_elapsed=%.2f)",
             chunk_value,

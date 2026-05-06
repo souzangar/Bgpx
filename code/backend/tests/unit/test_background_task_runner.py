@@ -636,6 +636,7 @@ def test_stop_after_success_stops_loop_without_self_cancelling_run() -> None:
 
         async def _run_once() -> None:
             run_completed.set()
+            await asyncio.sleep(0)
 
         runner.start_background_task_runner()
         runner.register_background_task(
