@@ -95,21 +95,8 @@ class IpGeolocationDataDownloader:
         self.last_sync_attempt_at = datetime.now(UTC)
 
         try:
-            if self._verbose:
-                logger.info(
-                    "IPinfo .gz downloader extracting gzip to temp (source=%s, temp=%s)",
-                    self._gz_source_path,
-                    self._temp_dataset_path,
-                )
             self._extract_gz_to_temp_json()
             should_replace = self._should_replace_working_dataset()
-            if self._verbose:
-                logger.info(
-                    "IPinfo .gz downloader compare completed (working=%s, temp=%s, should_replace=%s)",
-                    self._working_dataset_path,
-                    self._temp_dataset_path,
-                    should_replace,
-                )
 
             if should_replace:
                 if self._verbose:
@@ -118,21 +105,11 @@ class IpGeolocationDataDownloader:
                         self._working_dataset_path,
                     )
                 self._replace_working_dataset_from_temp()
-            elif self._verbose:
-                logger.info(
-                    "IPinfo .gz downloader no replace required (working already up-to-date path=%s)",
-                    self._working_dataset_path,
-                )
 
             self._last_fingerprint = next_fingerprint
             self.last_sync_error = None
             self.last_sync_succeeded_at = datetime.now(UTC)
             self.sync_success_count += 1
-            if self._verbose:
-                logger.info(
-                    "IPinfo .gz downloader sync succeeded (success_count=%s)",
-                    self.sync_success_count,
-                )
         except Exception as exc:
             self.last_sync_error = str(exc) or exc.__class__.__name__
             self.sync_failure_count += 1
@@ -144,11 +121,6 @@ class IpGeolocationDataDownloader:
                 )
         finally:
             self._delete_temp_file_if_exists()
-            if self._verbose:
-                logger.info(
-                    "IPinfo .gz downloader temp cleanup completed (temp=%s)",
-                    self._temp_dataset_path,
-                )
 
     def _extract_gz_to_temp_json(self) -> None:
         self._temp_dataset_path.parent.mkdir(parents=True, exist_ok=True)

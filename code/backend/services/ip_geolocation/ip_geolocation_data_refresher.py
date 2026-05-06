@@ -84,7 +84,6 @@ class IpGeolocationDataRefresher:
     def run_once(self) -> None:
         """Run one poll cycle and publish when source change is detected."""
         current = self._read_source_fingerprint()
-        self._log_poll_tick(current)
         if self._handle_missing_source(current):
             return
         if current is None:
@@ -99,42 +98,14 @@ class IpGeolocationDataRefresher:
 
         self._reload_and_publish(confirmed)
 
-    def _log_poll_tick(self, current: SourceFingerprint | None) -> None:
-        if not self._verbose:
-            return
-
-        logger.info(
-            "IP geolocation refresh poll tick "
-            "(path=%s, current_inode=%s, current_mtime_ns=%s, last_inode=%s, last_mtime_ns=%s)",
-            self._source_path,
-            None if current is None else current.inode,
-            None if current is None else current.mtime_ns,
-            None if self._last_fingerprint is None else self._last_fingerprint.inode,
-            None if self._last_fingerprint is None else self._last_fingerprint.mtime_ns,
-        )
-
     def _handle_missing_source(self, current: SourceFingerprint | None) -> bool:
         if current is not None:
             return False
-
-        if self._verbose:
-            logger.info(
-                "IP geolocation refresh poll tick skipped; source missing (path=%s)",
-                self._source_path,
-            )
         return True
 
     def _is_unchanged(self, current: SourceFingerprint) -> bool:
         if self._last_fingerprint is None or current != self._last_fingerprint:
             return False
-
-        if self._verbose:
-            logger.info(
-                "IP geolocation refresh poll tick unchanged; no refresh needed "
-                "(inode=%s, mtime_ns=%s)",
-                current.inode,
-                current.mtime_ns,
-            )
         return True
 
     def _confirm_change_after_debounce(

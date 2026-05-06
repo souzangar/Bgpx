@@ -151,8 +151,8 @@ def test_downloader_cleans_static_temp_file_on_failure(tmp_path: Path) -> None:
     assert temp_path.exists() is False
 
 
-def test_downloader_verbose_logs_each_step(monkeypatch, caplog, tmp_path: Path) -> None:
-    """Verbose mode should emit step-by-step downloader logs during sync."""
+def test_downloader_verbose_logs_only_refresh_events(monkeypatch, caplog, tmp_path: Path) -> None:
+    """Verbose mode should emit event-level logs only during sync."""
     monkeypatch.setenv("BGPX_VERBOSE", "1")
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
@@ -173,11 +173,11 @@ def test_downloader_verbose_logs_each_step(monkeypatch, caplog, tmp_path: Path) 
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("source change detected" in message for message in messages)
-    assert any("extracting gzip to temp" in message for message in messages)
-    assert any("compare completed" in message for message in messages)
     assert any("replacing working dataset" in message for message in messages)
-    assert any("sync succeeded" in message for message in messages)
-    assert any("temp cleanup completed" in message for message in messages)
+    assert all("extracting gzip to temp" not in message for message in messages)
+    assert all("compare completed" not in message for message in messages)
+    assert all("sync succeeded" not in message for message in messages)
+    assert all("temp cleanup completed" not in message for message in messages)
 
 
 def test_downloader_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog, tmp_path: Path) -> None:

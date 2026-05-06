@@ -122,8 +122,8 @@ def test_refresher_failure_does_not_crash_and_tracks_error() -> None:
     assert refresher.last_refresh_error == "parse failed"
 
 
-def test_refresher_verbose_logs_only_when_refresh_triggered(monkeypatch, caplog) -> None:
-    """Verbose mode should include refresh logs and unchanged-cycle diagnostics."""
+def test_refresher_verbose_logs_only_for_refresh_events(monkeypatch, caplog) -> None:
+    """Verbose mode should log refresh events, not per-cycle poll diagnostics."""
     published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
     monkeypatch.setenv("BGPX_VERBOSE", "1")
 
@@ -148,12 +148,12 @@ def test_refresher_verbose_logs_only_when_refresh_triggered(monkeypatch, caplog)
 
     assert len(published) == 1
     messages = [record.getMessage() for record in caplog.records]
-    assert any("refresh poll tick" in message for message in messages)
     assert any("source change detected" in message for message in messages)
     assert any("refresh chunk published" in message for message in messages)
     assert any("snapshot refresh succeeded" in message for message in messages)
-    assert any("poll tick unchanged" in message for message in messages)
-    assert len(messages) == 6
+    assert all("refresh poll tick" not in message for message in messages)
+    assert all("poll tick unchanged" not in message for message in messages)
+    assert len(messages) == 3
 
 
 def test_refresher_verbose_logs_each_chunk_publish(monkeypatch, caplog) -> None:
@@ -202,8 +202,8 @@ def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) ->
     assert caplog.records == []
 
 
-def test_refresher_verbose_logs_each_poll_tick_when_unchanged(monkeypatch, caplog) -> None:
-    """Verbose mode should log each poll tick even when source fingerprint is unchanged."""
+def test_refresher_verbose_does_not_log_on_unchanged_cycle(monkeypatch, caplog) -> None:
+    """Verbose mode should not emit poll-cycle logs when fingerprint is unchanged."""
     monkeypatch.setenv("BGPX_VERBOSE", "1")
 
     fingerprints = [
@@ -223,14 +223,17 @@ def test_refresher_verbose_logs_each_poll_tick_when_unchanged(monkeypatch, caplo
 
     with caplog.at_level(logging.INFO):
         refresher.run_once()
+
+    first_run_count = len(caplog.records)
+    assert first_run_count == 3
+
+    with caplog.at_level(logging.INFO):
         refresher.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
-    tick_messages = [message for message in messages if "refresh poll tick" in message]
-    unchanged_messages = [message for message in messages if "poll tick unchanged" in message]
-
-    assert len(tick_messages) == 3
-    assert len(unchanged_messages) == 1
+    assert len(caplog.records) == first_run_count
+    assert all("refresh poll tick" not in message for message in messages)
+    assert all("poll tick unchanged" not in message for message in messages)
 
 
 def test_refresher_progressively_publishes_chunked_results() -> None:

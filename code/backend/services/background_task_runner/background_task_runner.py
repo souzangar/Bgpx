@@ -358,9 +358,6 @@ class BackgroundTaskRunner:
         if not should_spawn_run_task:
             return
 
-        if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
-            _logger.info("BG runner schedule task_id=%s", task_id)
-
         run_task = asyncio.create_task(
             self._execute_registered_task_run(task_id),
             name=f"background-task-run:{task_id}",
@@ -577,12 +574,6 @@ class BackgroundTaskRunner:
 
         # Immediate peer scheduling — breaks phase-alignment starvation.
         for peer_id in peer_task_ids_to_schedule:
-            if _is_verbose_enabled() and peer_id in _IP_GEO_TASK_IDS:
-                _logger.info(
-                    "BG runner peer-schedule task_id=%s triggered_by=%s",
-                    peer_id,
-                    task_id,
-                )
             self._schedule_task_run_if_possible(peer_id)
 
     def start_background_task_runner(self) -> None:
