@@ -17,14 +17,7 @@ from typing import Any, Callable
 GZ_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json.gz")
 WORKING_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json")
 TEMP_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.tmp.json")
-VERBOSE_ENV = "BGPX_VERBOSE"
-_TRUTHY_VALUES = {"1", "true", "yes", "on"}
-logger = logging.getLogger("uvicorn.error")
-
-
-def _is_verbose_enabled() -> bool:
-    """Return whether verbose logging is enabled from runtime environment."""
-    return os.getenv(VERBOSE_ENV, "0").strip().lower() in _TRUTHY_VALUES
+logger = logging.getLogger("bgpx.tasks.ip_geo.downloader")
 
 
 @dataclass(frozen=True)
@@ -54,7 +47,6 @@ class IpGeolocationDataDownloader:
         self._debounce_seconds = debounce_seconds
         self._stat_func = stat_func
         self._sleep_func = sleep_func
-        self._verbose = _is_verbose_enabled()
 
         self._last_fingerprint: SourceFingerprint | None = None
         self.last_sync_error: str | None = None
@@ -66,27 +58,34 @@ class IpGeolocationDataDownloader:
 
     def run_once(self) -> None:
         """Run one poll cycle and sync working dataset when .gz source changes."""
+        logger.debug("IPinfo .gz downloader poll tick started (path=%s)", self._gz_source_path)
         current = self._read_source_fingerprint()
         if current is None:
+            logger.debug("IPinfo .gz downloader poll tick skipped; source missing")
             return
 
         if self._last_fingerprint is not None and current == self._last_fingerprint:
+            logger.debug(
+                "IPinfo .gz downloader poll tick unchanged (inode=%s, mtime_ns=%s)",
+                current.inode,
+                current.mtime_ns,
+            )
             return
 
         if self._last_fingerprint is not None and self._debounce_seconds > 0:
             self._sleep_func(self._debounce_seconds)
             confirmed = self._read_source_fingerprint()
             if confirmed is None or confirmed == self._last_fingerprint:
+                logger.debug("IPinfo .gz downloader poll tick skipped after debounce confirmation")
                 return
             current = confirmed
 
-        if self._verbose:
-            logger.info(
-                "IPinfo .gz downloader source change detected (path=%s, inode=%s, mtime_ns=%s)",
-                self._gz_source_path,
-                current.inode,
-                current.mtime_ns,
-            )
+        logger.info(
+            "IPinfo .gz downloader source change detected (path=%s, inode=%s, mtime_ns=%s)",
+            self._gz_source_path,
+            current.inode,
+            current.mtime_ns,
+        )
 
         self._extract_compare_and_replace(current)
 
@@ -99,12 +98,13 @@ class IpGeolocationDataDownloader:
             should_replace = self._should_replace_working_dataset()
 
             if should_replace:
-                if self._verbose:
-                    logger.info(
-                        "IPinfo .gz downloader replacing working dataset (working=%s)",
-                        self._working_dataset_path,
-                    )
+                logger.info(
+                    "IPinfo .gz downloader replacing working dataset (working=%s)",
+                    self._working_dataset_path,
+                )
                 self._replace_working_dataset_from_temp()
+            else:
+                logger.debug("IPinfo .gz downloader extracted content unchanged; keeping working dataset")
 
             self._last_fingerprint = next_fingerprint
             self.last_sync_error = None
@@ -113,12 +113,11 @@ class IpGeolocationDataDownloader:
         except Exception as exc:
             self.last_sync_error = str(exc) or exc.__class__.__name__
             self.sync_failure_count += 1
-            if self._verbose:
-                logger.exception(
-                    "IPinfo .gz downloader sync failed (failure_count=%s): %s",
-                    self.sync_failure_count,
-                    self.last_sync_error,
-                )
+            logger.exception(
+                "IPinfo .gz downloader sync failed (failure_count=%s): %s",
+                self.sync_failure_count,
+                self.last_sync_error,
+            )
         finally:
             self._delete_temp_file_if_exists()
 

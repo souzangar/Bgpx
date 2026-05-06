@@ -16,15 +16,7 @@ from infra.ip_geolocation import (
     IpGeolocationReadResult,
 )
 
-
-VERBOSE_ENV = "BGPX_VERBOSE"
-_TRUTHY_VALUES = {"1", "true", "yes", "on"}
-logger = logging.getLogger("uvicorn.error")
-
-
-def _is_verbose_enabled() -> bool:
-    """Return whether verbose logging is enabled from runtime environment."""
-    return os.getenv(VERBOSE_ENV, "0").strip().lower() in _TRUTHY_VALUES
+logger = logging.getLogger("bgpx.tasks.ip_geo.refresher")
 
 
 @dataclass(frozen=True)
@@ -71,7 +63,6 @@ class IpGeolocationDataRefresher:
         self._stat_func = stat_func
         self._sleep_func = sleep_func
         self._publish_chunk_size = publish_chunk_size
-        self._verbose = _is_verbose_enabled()
 
         self._last_fingerprint: SourceFingerprint | None = None
         self.last_refresh_error: str | None = None
@@ -83,17 +74,26 @@ class IpGeolocationDataRefresher:
 
     def run_once(self) -> None:
         """Run one poll cycle and publish when source change is detected."""
+        logger.debug("IP geolocation refresher poll tick started (path=%s)", self._source_path)
         current = self._read_source_fingerprint()
         if self._handle_missing_source(current):
+            logger.debug("IP geolocation refresher poll tick skipped; source missing")
             return
         if current is None:
+            logger.debug("IP geolocation refresher poll tick skipped; source fingerprint unavailable")
             return
 
         if self._is_unchanged(current):
+            logger.debug(
+                "IP geolocation refresher poll tick unchanged (inode=%s, mtime_ns=%s)",
+                current.inode,
+                current.mtime_ns,
+            )
             return
 
         confirmed = self._confirm_change_after_debounce(current)
         if confirmed is None:
+            logger.debug("IP geolocation refresher poll tick skipped after debounce confirmation")
             return
 
         self._reload_and_publish(confirmed)
@@ -127,15 +127,13 @@ class IpGeolocationDataRefresher:
         refresh_started_at = time.monotonic()
         self.refresh_attempt_count += 1
         self.last_refresh_attempt_at = datetime.now(UTC)
-
-        if self._verbose:
-            logger.info(
-                "IP geolocation source change detected; refreshing snapshot "
-                "(path=%s, inode=%s, mtime_ns=%s)",
-                self._source_path,
-                next_fingerprint.inode,
-                next_fingerprint.mtime_ns,
-            )
+        logger.info(
+            "IP geolocation source change detected; refreshing snapshot "
+            "(path=%s, inode=%s, mtime_ns=%s)",
+            self._source_path,
+            next_fingerprint.inode,
+            next_fingerprint.mtime_ns,
+        )
 
         try:
             read_result = self._adapter.read_records()
@@ -155,23 +153,21 @@ class IpGeolocationDataRefresher:
                 return
 
             self._mark_refresh_success(next_fingerprint)
-            if self._verbose:
-                logger.info(
-                    "IP geolocation snapshot refresh succeeded "
-                    "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                    last_read_result.total_lines,
-                    last_read_result.malformed_lines,
-                    self.refresh_success_count,
-                )
+            logger.info(
+                "IP geolocation snapshot refresh succeeded "
+                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+                last_read_result.total_lines,
+                last_read_result.malformed_lines,
+                self.refresh_success_count,
+            )
         except Exception as exc:
             self.last_refresh_error = str(exc) or exc.__class__.__name__
             self.refresh_failure_count += 1
-            if self._verbose:
-                logger.exception(
-                    "IP geolocation snapshot refresh failed (failure_count=%s): %s",
-                    self.refresh_failure_count,
-                    self.last_refresh_error,
-                )
+            logger.exception(
+                "IP geolocation snapshot refresh failed (failure_count=%s): %s",
+                self.refresh_failure_count,
+                self.last_refresh_error,
+            )
 
     def _try_skip_for_equivalent_snapshot(
         self,
@@ -184,14 +180,13 @@ class IpGeolocationDataRefresher:
             return False
 
         self._mark_refresh_success(next_fingerprint)
-        if self._verbose:
-            logger.info(
-                "IP geolocation refresh skipped; source content unchanged "
-                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                read_result.total_lines,
-                read_result.malformed_lines,
-                self.refresh_success_count,
-            )
+        logger.info(
+            "IP geolocation refresh skipped; source content unchanged "
+            "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+            read_result.total_lines,
+            read_result.malformed_lines,
+            self.refresh_success_count,
+        )
         return True
 
     def _try_apply_delta(
@@ -207,14 +202,13 @@ class IpGeolocationDataRefresher:
             return False
 
         self._mark_refresh_success(next_fingerprint)
-        if self._verbose:
-            logger.info(
-                "IP geolocation snapshot refresh applied as delta "
-                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                read_result.total_lines,
-                read_result.malformed_lines,
-                self.refresh_success_count,
-            )
+        logger.info(
+            "IP geolocation snapshot refresh applied as delta "
+            "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+            read_result.total_lines,
+            read_result.malformed_lines,
+            self.refresh_success_count,
+        )
         return True
 
     def _publish_refresh_result(
@@ -304,12 +298,9 @@ class IpGeolocationDataRefresher:
         refresh_started_at: float,
         chunk_total: int | None = None,
     ) -> None:
-        if not self._verbose:
-            return
-
         secs_elapsed = time.monotonic() - refresh_started_at
         chunk_value = chunk_index if chunk_total is None else f"{chunk_index}/{chunk_total}"
-        logger.info(
+        logger.debug(
             "IP geolocation refresh chunk published "
             "(chunk=%s, is_final_chunk=%s, total_lines=%s, loaded_records=%s, malformed_lines=%s, secs_elapsed=%.2f)",
             chunk_value,

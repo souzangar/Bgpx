@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 import os
 from pathlib import Path
 import socket
@@ -29,18 +30,47 @@ from services.sslCert import ensure_ssl_files
 FRONTEND_MODE_ENV = "BGPX_FRONTEND_MODE"
 FRONTEND_DEV_URL_ENV = "BGPX_FRONTEND_DEV_URL"
 VERBOSE_ENV = "BGPX_VERBOSE"
+IP_GEO_REFRESHER_LOG_LEVEL_ENV = "BGPX_LOG_LEVEL_IP_GEO_REFRESHER"
+IP_GEO_DOWNLOADER_LOG_LEVEL_ENV = "BGPX_LOG_LEVEL_IP_GEO_DOWNLOADER"
 DEFAULT_FRONTEND_DEV_URL = "https://localhost:5173"
 FRONTEND_STARTUP_TIMEOUT_SECONDS = 30.0
 IP_GEO_BOOTSTRAP_TASK_ID = "ip_geolocation_bootstrap_once"
 IP_GEO_REFRESH_TASK_ID = "ip_geolocation_data_refresh"
-IP_GEO_REFRESH_INTERVAL_SECONDS = 1.0
+IP_GEO_REFRESH_INTERVAL_SECONDS = 5.0
 IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_ID = "ip_geolocation_ipinfo_gz_downloader"
-IP_GEO_IPINFO_GZ_DOWNLOADER_INTERVAL_SECONDS = 1.0
+IP_GEO_IPINFO_GZ_DOWNLOADER_INTERVAL_SECONDS = 5.0
 IP_GEO_BOOTSTRAP_INTERVAL_SECONDS = 0.5
 IP_GEO_DATASET_RESOURCE_KEY = "ip_geolocation_database_handler"
 IP_GEO_BOOTSTRAP_SEQUENCE = 5
 IP_GEO_IPINFO_GZ_DOWNLOADER_SEQUENCE = 10
 IP_GEO_REFRESH_SEQUENCE = 20
+
+_DEFAULT_TASK_INFO_LOG_LEVEL = "INFO"
+_DEFAULT_TASK_WARNING_LOG_LEVEL = "WARNING"
+
+
+def _resolve_log_level(level_text: str, default_level: int) -> int:
+    """Resolve a logging level value from text with fallback."""
+    normalized = level_text.strip().upper()
+    return logging.getLevelName(normalized) if isinstance(logging.getLevelName(normalized), int) else default_level
+
+
+def _configure_ip_geolocation_task_loggers() -> None:
+    """Apply centralized log-level policy for IP geolocation task loggers."""
+    verbose_enabled = os.getenv(VERBOSE_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
+
+    default_level_text = _DEFAULT_TASK_INFO_LOG_LEVEL if verbose_enabled else _DEFAULT_TASK_WARNING_LOG_LEVEL
+    refresher_level = _resolve_log_level(
+        os.getenv(IP_GEO_REFRESHER_LOG_LEVEL_ENV, default_level_text),
+        logging.INFO if verbose_enabled else logging.WARNING,
+    )
+    downloader_level = _resolve_log_level(
+        os.getenv(IP_GEO_DOWNLOADER_LOG_LEVEL_ENV, default_level_text),
+        logging.INFO if verbose_enabled else logging.WARNING,
+    )
+
+    logging.getLogger("bgpx.tasks.ip_geo.refresher").setLevel(refresher_level)
+    logging.getLogger("bgpx.tasks.ip_geo.downloader").setLevel(downloader_level)
 
 
 def _resolve_frontend_mode(explicit_mode: str | None = None) -> str:
@@ -176,6 +206,7 @@ def _start_frontend_dev_server(frontend_dev_url: str, frontend_dir: Path) -> sub
 @asynccontextmanager
 async def _app_lifespan(_app: FastAPI):
     """Manage process-local shared services bound to FastAPI lifecycle."""
+    _configure_ip_geolocation_task_loggers()
     runner = get_background_task_runner()
     runner.start_background_task_runner()
 

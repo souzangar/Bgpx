@@ -122,10 +122,9 @@ def test_refresher_failure_does_not_crash_and_tracks_error() -> None:
     assert refresher.last_refresh_error == "parse failed"
 
 
-def test_refresher_verbose_logs_only_for_refresh_events(monkeypatch, caplog) -> None:
-    """Verbose mode should log refresh events, not per-cycle poll diagnostics."""
+def test_refresher_info_logs_show_refresh_events(monkeypatch, caplog) -> None:
+    """INFO level should show state-change refresh events."""
     published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
-    monkeypatch.setenv("BGPX_VERBOSE", "1")
 
     fingerprints = [
         _FakeStat(10, 1000),
@@ -142,23 +141,20 @@ def test_refresher_verbose_logs_only_for_refresh_events(monkeypatch, caplog) -> 
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.INFO, logger="bgpx.tasks.ip_geo.refresher"):
         refresher.run_once()
         refresher.run_once()
 
     assert len(published) == 1
     messages = [record.getMessage() for record in caplog.records]
     assert any("source change detected" in message for message in messages)
-    assert any("refresh chunk published" in message for message in messages)
+    assert all("refresh chunk published" not in message for message in messages)
     assert any("snapshot refresh succeeded" in message for message in messages)
-    assert all("refresh poll tick" not in message for message in messages)
-    assert all("poll tick unchanged" not in message for message in messages)
-    assert len(messages) == 3
+    assert len(messages) == 2
 
 
-def test_refresher_verbose_logs_each_chunk_publish(monkeypatch, caplog) -> None:
-    """Chunked refresh should emit one verbose publish log per chunk."""
-    monkeypatch.setenv("BGPX_VERBOSE", "1")
+def test_refresher_debug_logs_each_chunk_publish(caplog) -> None:
+    """DEBUG level should emit one publish log per chunk."""
     chunks = [
         IpGeolocationReadResult(records=[], total_lines=2, malformed_lines=0),
         IpGeolocationReadResult(records=[], total_lines=4, malformed_lines=1),
@@ -172,7 +168,7 @@ def test_refresher_verbose_logs_each_chunk_publish(monkeypatch, caplog) -> None:
         publish_chunk_size=2,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.refresher"):
         refresher.run_once()
 
     chunk_messages = [record.getMessage() for record in caplog.records if "refresh chunk published" in record.getMessage()]
@@ -183,10 +179,9 @@ def test_refresher_verbose_logs_each_chunk_publish(monkeypatch, caplog) -> None:
     assert "is_final_chunk=True" in chunk_messages[1]
 
 
-def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) -> None:
-    """Refresh should not emit verbose logs when verbose mode is disabled."""
+def test_refresher_warning_level_suppresses_info_and_debug_logs(caplog) -> None:
+    """WARNING level should suppress routine info/debug refresher logs."""
     published: list[tuple[IpGeolocationReadResult, dict[str, object]]] = []
-    monkeypatch.setenv("BGPX_VERBOSE", "0")
 
     refresher = IpGeolocationDataRefresher(
         publish_snapshot=lambda result, metadata: published.append((result, metadata)),
@@ -195,16 +190,15 @@ def test_refresher_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog) ->
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.WARNING, logger="bgpx.tasks.ip_geo.refresher"):
         refresher.run_once()
 
     assert len(published) == 1
     assert caplog.records == []
 
 
-def test_refresher_verbose_does_not_log_on_unchanged_cycle(monkeypatch, caplog) -> None:
-    """Verbose mode should not emit poll-cycle logs when fingerprint is unchanged."""
-    monkeypatch.setenv("BGPX_VERBOSE", "1")
+def test_refresher_debug_logs_include_unchanged_cycle(caplog) -> None:
+    """DEBUG level should include per-cycle unchanged diagnostics."""
 
     fingerprints = [
         _FakeStat(10, 1000),
@@ -221,19 +215,15 @@ def test_refresher_verbose_does_not_log_on_unchanged_cycle(monkeypatch, caplog) 
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.refresher"):
         refresher.run_once()
 
-    first_run_count = len(caplog.records)
-    assert first_run_count == 3
-
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.refresher"):
         refresher.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
-    assert len(caplog.records) == first_run_count
-    assert all("refresh poll tick" not in message for message in messages)
-    assert all("poll tick unchanged" not in message for message in messages)
+    assert any("poll tick started" in message for message in messages)
+    assert any("poll tick unchanged" in message for message in messages)
 
 
 def test_refresher_progressively_publishes_chunked_results() -> None:

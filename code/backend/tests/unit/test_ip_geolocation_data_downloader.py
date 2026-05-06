@@ -151,9 +151,8 @@ def test_downloader_cleans_static_temp_file_on_failure(tmp_path: Path) -> None:
     assert temp_path.exists() is False
 
 
-def test_downloader_verbose_logs_only_refresh_events(monkeypatch, caplog, tmp_path: Path) -> None:
-    """Verbose mode should emit event-level logs only during sync."""
-    monkeypatch.setenv("BGPX_VERBOSE", "1")
+def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> None:
+    """INFO level should emit state-change sync logs."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
     temp_path = tmp_path / "ipinfo_lite.tmp.json"
@@ -168,21 +167,17 @@ def test_downloader_verbose_logs_only_refresh_events(monkeypatch, caplog, tmp_pa
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.INFO, logger="bgpx.tasks.ip_geo.downloader"):
         downloader.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("source change detected" in message for message in messages)
     assert any("replacing working dataset" in message for message in messages)
-    assert all("extracting gzip to temp" not in message for message in messages)
-    assert all("compare completed" not in message for message in messages)
-    assert all("sync succeeded" not in message for message in messages)
-    assert all("temp cleanup completed" not in message for message in messages)
+    assert all("poll tick" not in message for message in messages)
 
 
-def test_downloader_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog, tmp_path: Path) -> None:
-    """Downloader should not emit verbose logs when BGPX_VERBOSE is disabled."""
-    monkeypatch.setenv("BGPX_VERBOSE", "0")
+def test_downloader_warning_level_suppresses_info_and_debug_logs(caplog, tmp_path: Path) -> None:
+    """WARNING level should suppress routine downloader logs."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
     temp_path = tmp_path / "ipinfo_lite.tmp.json"
@@ -197,15 +192,14 @@ def test_downloader_no_verbose_logs_when_verbose_disabled(monkeypatch, caplog, t
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.WARNING, logger="bgpx.tasks.ip_geo.downloader"):
         downloader.run_once()
 
     assert caplog.records == []
 
 
-def test_downloader_no_skip_logs_even_when_verbose_enabled(monkeypatch, caplog, tmp_path: Path) -> None:
-    """Verbose mode should not emit any 'skipped' downloader logs."""
-    monkeypatch.setenv("BGPX_VERBOSE", "1")
+def test_downloader_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -> None:
+    """DEBUG level should include per-cycle unchanged diagnostics."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     _write_gz(gz_path, '{"a":2}\n')
 
@@ -222,9 +216,10 @@ def test_downloader_no_skip_logs_even_when_verbose_enabled(monkeypatch, caplog, 
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.downloader"):
         downloader.run_once()
         downloader.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
-    assert not any("IPinfo .gz downloader skipped" in message for message in messages)
+    assert any("poll tick started" in message for message in messages)
+    assert any("poll tick unchanged" in message for message in messages)
