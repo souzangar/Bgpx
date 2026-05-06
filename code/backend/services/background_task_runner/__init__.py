@@ -20,12 +20,14 @@ from .background_task_runner import (  # noqa: F401
     get_background_task_runner,
     reset_background_task_runner_for_tests,
 )
+from .ip_geolocation_lifespan import app_lifespan  # noqa: F401
 
 __all__ = [
     "AsyncTaskCallable",
     "BackgroundTaskRunner",
     "BackgroundTaskDefinition",
     "BackgroundTaskStatus",
+    "app_lifespan",
     "get_background_task_runner",
     "OverlapPolicy",
     "reset_background_task_runner_for_tests",
