@@ -59,6 +59,7 @@ class _ResourceGroupState:
     resource_key: str
     task_ids: list[str]
     active_task_id: str | None = None
+    next_task_id_turn: str | None = None
 
 
 class BackgroundTaskRunner:
@@ -88,25 +89,24 @@ class BackgroundTaskRunner:
     def _add_task_to_resource_group(self, task_definition: BackgroundTaskDefinition) -> None:
         """Register task membership in a resource group when key is provided."""
         resource_key = task_definition.resource_key
-        if resource_key is None:
-            return
 
         group_state = self._resource_groups.get(resource_key)
         if group_state is None:
             self._resource_groups[resource_key] = _ResourceGroupState(
                 resource_key=resource_key,
                 task_ids=[task_definition.task_id],
+                next_task_id_turn=task_definition.task_id,
             )
             return
 
         group_state.task_ids.append(task_definition.task_id)
         group_state.task_ids = self._sort_resource_group_task_ids(group_state.task_ids)
+        if group_state.next_task_id_turn is None:
+            group_state.next_task_id_turn = group_state.task_ids[0]
 
     def _remove_task_from_resource_group(self, task_definition: BackgroundTaskDefinition) -> None:
         """Unregister task membership in a resource group when key is provided."""
         resource_key = task_definition.resource_key
-        if resource_key is None:
-            return
 
         group_state = self._resource_groups.get(resource_key)
         if group_state is None:
@@ -123,6 +123,49 @@ class BackgroundTaskRunner:
             return
 
         group_state.task_ids = self._sort_resource_group_task_ids(group_state.task_ids)
+        if group_state.next_task_id_turn not in group_state.task_ids:
+            group_state.next_task_id_turn = group_state.task_ids[0]
+
+    def _advance_resource_group_turn(self, resource_group: _ResourceGroupState, completed_task_id: str) -> None:
+        """Advance sequence turn to the next task id within a resource group."""
+        if not resource_group.task_ids:
+            resource_group.next_task_id_turn = None
+            return
+        try:
+            current_index = resource_group.task_ids.index(completed_task_id)
+        except ValueError:
+            resource_group.next_task_id_turn = resource_group.task_ids[0]
+            return
+        next_index = (current_index + 1) % len(resource_group.task_ids)
+        resource_group.next_task_id_turn = resource_group.task_ids[next_index]
+
+    def _normalize_resource_group_turn(self, resource_group: _ResourceGroupState) -> None:
+        """Ensure turn pointer targets a running task in sequence order when possible."""
+        if not resource_group.task_ids:
+            resource_group.next_task_id_turn = None
+            return
+
+        running_task_ids = [
+            task_id
+            for task_id in resource_group.task_ids
+            if (state := self._registry.get(task_id)) is not None and state.status.is_running
+        ]
+        if not running_task_ids:
+            resource_group.next_task_id_turn = resource_group.task_ids[0]
+            return
+
+        if resource_group.next_task_id_turn in running_task_ids:
+            # If current turn points to a task that is still startup-blocked by
+            # an earlier running sibling, force turn to the lowest running task
+            # to avoid sequence-turn deadlock.
+            if self._resource_group_preceding_task_is_eligible(
+                resource_group,
+                resource_group.next_task_id_turn,
+            ):
+                resource_group.next_task_id_turn = running_task_ids[0]
+            return
+
+        resource_group.next_task_id_turn = running_task_ids[0]
 
     def _build_initial_task_status(self, task_id: str) -> BackgroundTaskStatus:
         """Create deterministic initial status for a newly registered task."""
@@ -241,10 +284,32 @@ class BackgroundTaskRunner:
 
         return max(0.0, min(bounded_delay, retry_config.max_delay_seconds))
 
+    def _should_attempt_scheduling_tick(self, task_id: str, state: _RegisteredTaskState) -> bool:
+        """Return whether this task loop tick should attempt scheduling.
+
+        This is a pre-gate used to avoid noisy skip logs from non-turn/non-owner
+        peers in the same resource group. Actual safety checks still happen in
+        ``_schedule_task_run_if_possible``.
+        """
+        resource_group = self._resource_groups.get(state.task_definition.resource_key)
+        if resource_group is None:
+            return True
+
+        self._normalize_resource_group_turn(resource_group)
+
+        if resource_group.active_task_id is not None and resource_group.active_task_id != task_id:
+            return False
+
+        if resource_group.next_task_id_turn is not None and resource_group.next_task_id_turn != task_id:
+            return False
+
+        return True
+
     async def _run_registered_task_loop(self, task_id: str) -> None:
         """Run scheduling loop for one registered task id until stopped/cancelled."""
         try:
             while True:
+                should_attempt_scheduling = True
                 with self._state_lock:
                     state = self._registry.get(task_id)
                     if state is None:
@@ -254,8 +319,10 @@ class BackgroundTaskRunner:
                         return
 
                     interval_seconds = state.task_definition.interval_seconds
+                    should_attempt_scheduling = self._should_attempt_scheduling_tick(task_id, state)
 
-                self._schedule_task_run_if_possible(task_id)
+                if should_attempt_scheduling:
+                    self._schedule_task_run_if_possible(task_id)
                 await asyncio.sleep(interval_seconds)
         finally:
             with self._state_lock:
@@ -278,12 +345,11 @@ class BackgroundTaskRunner:
     def _is_resource_group_blocking_run(self, task_id: str, state: _RegisteredTaskState) -> bool:
         """Return whether resource-group constraints currently block this run."""
         resource_key = state.task_definition.resource_key
-        if resource_key is None:
-            return False
-
         resource_group = self._resource_groups.get(resource_key)
         if resource_group is None:
             return False
+
+        self._normalize_resource_group_turn(resource_group)
 
         if resource_group.active_task_id is not None and resource_group.active_task_id != task_id:
             state.status = replace(
@@ -295,6 +361,19 @@ class BackgroundTaskRunner:
                     "BG runner skip task_id=%s reason=resource_group_active active_task_id=%s",
                     task_id,
                     resource_group.active_task_id,
+                )
+            return True
+
+        if resource_group.next_task_id_turn is not None and resource_group.next_task_id_turn != task_id:
+            state.status = replace(
+                state.status,
+                skipped_overlap_runs=state.status.skipped_overlap_runs + 1,
+            )
+            if _is_verbose_enabled() and task_id in _IP_GEO_TASK_IDS:
+                _logger.info(
+                    "BG runner skip task_id=%s reason=resource_group_sequence_turn expected_task_id=%s",
+                    task_id,
+                    resource_group.next_task_id_turn,
                 )
             return True
 
@@ -312,10 +391,9 @@ class BackgroundTaskRunner:
         """Mark task state as running for a newly scheduled run."""
         state.run_in_progress = True
         resource_key = state.task_definition.resource_key
-        if resource_key is not None:
-            resource_group = self._resource_groups.get(resource_key)
-            if resource_group is not None:
-                resource_group.active_task_id = task_id
+        resource_group = self._resource_groups.get(resource_key)
+        if resource_group is not None:
+            resource_group.active_task_id = task_id
 
         state.status = replace(
             state.status,
@@ -426,12 +504,10 @@ class BackgroundTaskRunner:
 
         state.run_in_progress = False
         resource_key = state.task_definition.resource_key
-        if resource_key is None:
-            return
-
         resource_group = self._resource_groups.get(resource_key)
         if resource_group is not None and resource_group.active_task_id == task_id:
             resource_group.active_task_id = None
+            self._advance_resource_group_turn(resource_group, task_id)
 
     def _apply_success_status_after_run(self, state: _RegisteredTaskState) -> None:
         """Apply status mutations for successful run completion."""
@@ -485,10 +561,9 @@ class BackgroundTaskRunner:
         state.next_eligible_run_at_monotonic = 0.0
 
         resource_key = state.task_definition.resource_key
-        if resource_key is not None:
-            resource_group = self._resource_groups.get(resource_key)
-            if resource_group is not None:
-                resource_group.active_task_id = None
+        resource_group = self._resource_groups.get(resource_key)
+        if resource_group is not None:
+            resource_group.active_task_id = None
 
         if state.loop_handle is not None:
             tasks_to_cancel.append(state.loop_handle)
@@ -513,9 +588,6 @@ class BackgroundTaskRunner:
         opportunity rather than waiting for their next loop tick.
         """
         resource_key = state.task_definition.resource_key
-        if resource_key is None:
-            return []
-
         resource_group = self._resource_groups.get(resource_key)
         if resource_group is None:
             return []
@@ -526,6 +598,8 @@ class BackgroundTaskRunner:
                 continue
             peer_state = self._registry.get(peer_id)
             if peer_state is None:
+                continue
+            if resource_group.next_task_id_turn is not None and peer_id != resource_group.next_task_id_turn:
                 continue
             if peer_state.status.is_running and not peer_state.run_in_progress:
                 peer_ids.append(peer_id)
@@ -651,6 +725,9 @@ class BackgroundTaskRunner:
             state.status = replace(state.status, is_running=True)
             state.run_in_progress = False
             state.next_eligible_run_at_monotonic = 0.0
+            resource_group = self._resource_groups.get(state.task_definition.resource_key)
+            if resource_group is not None:
+                self._normalize_resource_group_turn(resource_group)
             state.loop_handle = event_loop.create_task(
                 self._run_registered_task_loop(task_id),
                 name=f"background-task-loop:{task_id}",
@@ -678,10 +755,11 @@ class BackgroundTaskRunner:
             state.run_in_progress = False
             state.next_eligible_run_at_monotonic = 0.0
             resource_key = state.task_definition.resource_key
-            if resource_key is not None:
-                resource_group = self._resource_groups.get(resource_key)
-                if resource_group is not None and resource_group.active_task_id == task_id:
-                    resource_group.active_task_id = None
+            resource_group = self._resource_groups.get(resource_key)
+            if resource_group is not None and resource_group.active_task_id == task_id:
+                resource_group.active_task_id = None
+            if resource_group is not None:
+                self._normalize_resource_group_turn(resource_group)
             if state.loop_handle is not None:
                 tasks_to_cancel.append(state.loop_handle)
             state.loop_handle = None

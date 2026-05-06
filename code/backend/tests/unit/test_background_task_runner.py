@@ -30,7 +30,7 @@ def _build_task(
     base_delay_seconds: float = 0.01,
     max_delay_seconds: float = 0.05,
     jitter_ratio: float = 0.0,
-    resource_key: str | None = None,
+    resource_key: str = "test_default_group",
     resource_sequence: int = 0,
     stop_after_success: bool = False,
 ) -> BackgroundTaskDefinition:
