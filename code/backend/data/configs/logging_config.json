@@ -61,7 +61,7 @@
         },
         "source_missing": {
           "enabled": true,
-          "level": "DEBUG"
+          "level": "WARNING"
         },
         "source_fingerprint_unavailable": {
           "enabled": true,
@@ -112,7 +112,7 @@
         },
         "source_missing": {
           "enabled": true,
-          "level": "DEBUG"
+          "level": "WARNING"
         },
         "poll_unchanged": {
           "enabled": true,

@@ -12,19 +12,11 @@ from typing import Any
 
 
 VERBOSE_ENV = "BGPX_VERBOSE"
-IP_GEO_REFRESHER_LOG_LEVEL_ENV = "BGPX_LOG_LEVEL_IP_GEO_REFRESHER"
-IP_GEO_DOWNLOADER_LOG_LEVEL_ENV = "BGPX_LOG_LEVEL_IP_GEO_DOWNLOADER"
-BG_RUNNER_LOG_LEVEL_ENV = "BGPX_LOG_LEVEL_BG_RUNNER"
 LOGGING_CONFIG_PATH = Path(__file__).resolve().parents[2] / "data" / "configs" / "logging_config.json"
 
 
 _EVENT_REGISTRY: "LoggingEventConfigRegistry | None" = None
 _LOGGING_CONFIG_MTIME_NS: int | None = None
-
-
-def _normalize_level_text(level_text: str, default_level: int) -> str:
-    resolved_level = _resolve_log_level(level_text, default_level)
-    return logging.getLevelName(resolved_level)
 
 
 def _resolve_log_level(level_text: str, default_level: int) -> int:
@@ -36,6 +28,37 @@ def _resolve_log_level(level_text: str, default_level: int) -> int:
 
 def _is_verbose_enabled() -> bool:
     return os.getenv(VERBOSE_ENV, "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _apply_named_logger_level(loggers: Any, logger_name: str, level: int) -> None:
+    if not isinstance(loggers, dict):
+        return
+    logger_config = loggers.get(logger_name)
+    if isinstance(logger_config, dict):
+        logger_config["level"] = logging.getLevelName(level)
+
+
+def _apply_verbose_levels(logging_config: dict[str, Any]) -> None:
+    if not _is_verbose_enabled():
+        return
+
+    verbose_level = logging.INFO
+
+    root_config = logging_config.get("root")
+    if isinstance(root_config, dict):
+        root_config["level"] = logging.getLevelName(verbose_level)
+
+    loggers = logging_config.get("loggers")
+    for logger_name in (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "bgpx",
+        "bgpx.tasks.ip_geo.refresher",
+        "bgpx.tasks.ip_geo.downloader",
+        "bgpx.runner.background_task_runner",
+    ):
+        _apply_named_logger_level(loggers, logger_name, verbose_level)
 
 
 def _load_logging_config() -> dict[str, Any]:
@@ -180,60 +203,10 @@ def configure_backend_logging() -> None:
 
     loaded_config = _load_logging_config()
     logging_config = deepcopy(loaded_config)
-    verbose_enabled = _is_verbose_enabled()
-    default_level = logging.INFO if verbose_enabled else logging.WARNING
-    default_level_text = "INFO" if verbose_enabled else "WARNING"
-
-    refresher_level = _resolve_log_level(
-        os.getenv(IP_GEO_REFRESHER_LOG_LEVEL_ENV, default_level_text),
-        default_level,
-    )
-    downloader_level = _resolve_log_level(
-        os.getenv(IP_GEO_DOWNLOADER_LOG_LEVEL_ENV, default_level_text),
-        default_level,
-    )
-    bg_runner_level = _resolve_log_level(
-        os.getenv(BG_RUNNER_LOG_LEVEL_ENV, default_level_text),
-        default_level,
-    )
-
-    root_config = logging_config.get("root")
-    if isinstance(root_config, dict):
-        root_config["level"] = logging.getLevelName(default_level)
-
-    loggers = logging_config.get("loggers")
-    if isinstance(loggers, dict):
-        for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access", "bgpx"):
-            logger_config = loggers.get(logger_name)
-            if isinstance(logger_config, dict):
-                logger_config["level"] = logging.getLevelName(default_level)
-
-        refresher_logger = loggers.get("bgpx.tasks.ip_geo.refresher")
-        if isinstance(refresher_logger, dict):
-            refresher_logger["level"] = logging.getLevelName(refresher_level)
-
-        downloader_logger = loggers.get("bgpx.tasks.ip_geo.downloader")
-        if isinstance(downloader_logger, dict):
-            downloader_logger["level"] = logging.getLevelName(downloader_level)
-
-        bg_runner_logger = loggers.get("bgpx.runner.background_task_runner")
-        if isinstance(bg_runner_logger, dict):
-            bg_runner_logger["level"] = logging.getLevelName(bg_runner_level)
+    _apply_verbose_levels(logging_config)
 
     components = logging_config.get("components")
     component_map = components if isinstance(components, dict) else {}
-
-    env_component_map: dict[str, str] = {
-        "ip_geo_refresher": IP_GEO_REFRESHER_LOG_LEVEL_ENV,
-        "ip_geo_downloader": IP_GEO_DOWNLOADER_LOG_LEVEL_ENV,
-        "background_task_runner": BG_RUNNER_LOG_LEVEL_ENV,
-    }
-    for component_name, env_key in env_component_map.items():
-        component = component_map.get(component_name)
-        if not isinstance(component, dict):
-            continue
-        level_from_env = os.getenv(env_key, default_level_text)
-        component["default_level"] = _normalize_level_text(level_from_env, default_level)
 
     _EVENT_REGISTRY = LoggingEventConfigRegistry(component_map)
     _LOGGING_CONFIG_MTIME_NS = _read_logging_config_mtime_ns()
