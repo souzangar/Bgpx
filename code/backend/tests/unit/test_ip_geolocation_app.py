@@ -14,6 +14,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from apps.ip_geolocation import (  # noqa: E402
+    force_ipinfo_gz_update,
     get_ip_geolocation_load_status,
     lookup_asn_geolocation,
     lookup_continent_geolocation,
@@ -340,3 +341,51 @@ def test_lookup_ip_geolocation_by_request_rejects_other_unsupported_type() -> No
 
     assert exc_info.value.status_code == 400
     assert "Unsupported lookup type" in str(exc_info.value)
+
+
+def test_force_ipinfo_gz_update_runs_downloader_and_returns_success(monkeypatch) -> None:
+    """Force update should execute downloader once and expose success summary."""
+
+    def _fake_run_once(self) -> None:
+        self.download_attempt_count += 1
+        self.download_success_count += 1
+        self.download_failure_count = 0
+        self.last_download_error = None
+
+    monkeypatch.setattr(
+        "services.ip_geolocation.ip_geolocation_ipinfo_gz_downloader.IpGeolocationIpinfoGzDownloader.run_once",
+        _fake_run_once,
+    )
+
+    payload = force_ipinfo_gz_update()
+
+    assert payload.status == "success"
+    assert payload.action == "ipinfo_gz_force_update"
+    assert payload.attempts == 1
+    assert payload.success_count == 1
+    assert payload.failure_count == 0
+    assert payload.last_error is None
+
+
+def test_force_ipinfo_gz_update_runs_downloader_and_returns_failure(monkeypatch) -> None:
+    """Force update should expose failure summary when downloader run fails."""
+
+    def _fake_run_once(self) -> None:
+        self.download_attempt_count += 1
+        self.download_success_count = 0
+        self.download_failure_count += 1
+        self.last_download_error = "invalid API token"
+
+    monkeypatch.setattr(
+        "services.ip_geolocation.ip_geolocation_ipinfo_gz_downloader.IpGeolocationIpinfoGzDownloader.run_once",
+        _fake_run_once,
+    )
+
+    payload = force_ipinfo_gz_update()
+
+    assert payload.status == "failure"
+    assert payload.action == "ipinfo_gz_force_update"
+    assert payload.attempts == 1
+    assert payload.success_count == 0
+    assert payload.failure_count == 1
+    assert payload.last_error == "invalid API token"

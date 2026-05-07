@@ -8,6 +8,7 @@ from typing import Annotated, Any, cast
 from fastapi import APIRouter, Body
 
 from apps.ip_geolocation import (
+    force_ipinfo_gz_update,
     get_ip_geolocation_load_status,
     lookup_ip_geolocation_by_request,
 )
@@ -36,3 +37,9 @@ def lookup_ip_geo(
 def get_ip_geo_status() -> dict[str, Any]:
     """Return current IP geolocation service load/refresh status."""
     return _to_payload(get_ip_geolocation_load_status())
+
+
+@router.post("/ipinfo_update", tags=["ip-geolocation"])
+def force_ipinfo_update() -> dict[str, Any]:
+    """Force one immediate IPinfo .gz downloader execution cycle."""
+    return _to_payload(force_ipinfo_gz_update())

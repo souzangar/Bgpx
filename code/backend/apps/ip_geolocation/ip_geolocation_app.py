@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime
+
 from fastapi import HTTPException
 
 from models.ip_geolocation import (
@@ -10,6 +13,21 @@ from models.ip_geolocation import (
     IpGeolocationLookupResponseModel,
 )
 from services.ip_geolocation import IpGeolocationService
+from services.ip_geolocation.ip_geolocation_ipinfo_gz_downloader import IpGeolocationIpinfoGzDownloader
+
+
+@dataclass(frozen=True)
+class IpinfoForceUpdateResponseModel:
+    """App-level response model for manual IPinfo .gz force update trigger."""
+
+    status: str
+    action: str
+    attempts: int
+    success_count: int
+    failure_count: int
+    last_attempt_at: datetime | None
+    last_succeeded_at: datetime | None
+    last_error: str | None
 
 
 _ip_geolocation_service = IpGeolocationService()
@@ -65,3 +83,20 @@ def lookup_ip_geolocation_by_request(
 def get_ip_geolocation_load_status() -> IpGeolocationLoadStatusModel:
     """Return current service load status for API/read consumers."""
     return get_ip_geolocation_service().get_ip_geolocation_load_status()
+
+
+def force_ipinfo_gz_update() -> IpinfoForceUpdateResponseModel:
+    """Trigger one immediate IPinfo .gz downloader cycle and return execution summary."""
+    downloader = IpGeolocationIpinfoGzDownloader()
+    downloader.run_once()
+
+    return IpinfoForceUpdateResponseModel(
+        status="success" if downloader.last_download_error is None else "failure",
+        action="ipinfo_gz_force_update",
+        attempts=downloader.download_attempt_count,
+        success_count=downloader.download_success_count,
+        failure_count=downloader.download_failure_count,
+        last_attempt_at=downloader.last_download_attempt_at,
+        last_succeeded_at=downloader.last_download_succeeded_at,
+        last_error=downloader.last_download_error,
+    )

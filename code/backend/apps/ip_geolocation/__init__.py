@@ -1,6 +1,7 @@
 """IP geolocation application package."""
 
 from .ip_geolocation_app import (
+    force_ipinfo_gz_update,
     get_ip_geolocation_load_status,
     get_ip_geolocation_service,
     lookup_asn_geolocation,
@@ -11,6 +12,7 @@ from .ip_geolocation_app import (
 )
 
 __all__ = [
+    "force_ipinfo_gz_update",
     "get_ip_geolocation_load_status",
     "get_ip_geolocation_service",
     "lookup_asn_geolocation",

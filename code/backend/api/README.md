@@ -183,7 +183,7 @@ This keeps routing clean and feature growth predictable.
 
 Current IP geolocation lookup API contract:
 
-- **Method/Path**: `POST /api/ipinfo`
+- **Method/Path**: `GET /api/ipinfo` (GET-with-body in current implementation)
 - **Request Body**:
 
 ```json
@@ -194,9 +194,13 @@ Current IP geolocation lookup API contract:
 ```
 
 Behavior notes:
-- `type` is a target discriminator for future lookup types.
-- Currently supported `type` value is only `"ip"`.
+- `type` is a target discriminator.
+- Currently supported values: `"ip"`, `"asn"`, `"country"`, `"continent"`.
 - Unsupported `type` values return an intentional client error response.
 
 Status route remains:
-- `GET /api/geo/status`
+- `GET /api/ipinfo_status`
+
+Manual force-update route:
+- `POST /api/ipinfo_update`
+- Triggers one immediate `IpGeolocationIpinfoGzDownloader.run_once()` cycle via app layer orchestration.

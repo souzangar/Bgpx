@@ -694,6 +694,24 @@ Suggested endpoints:
 - `GET /api/geo/status`
 - `POST /api/geo/reload` (optional)
 
+### 10.1 Manual IPinfo .gz force-update endpoint
+
+In addition to scheduled background execution (`ipinfo_gz_downloader` task), the API layer exposes:
+
+- `POST /api/ipinfo_update`
+
+Purpose:
+- trigger one immediate downloader cycle for `ipinfo_lite.json.gz` when operators need on-demand refresh outside the normal 24h schedule.
+
+Layered flow:
+- `api/ip_geolocation_api.py` route handler delegates to app layer
+- `apps/ip_geolocation/ip_geolocation_app.py` orchestrates one-shot invocation
+- app layer invokes `IpGeolocationIpinfoGzDownloader.run_once()` from service layer component
+
+Behavior:
+- endpoint returns a structured execution summary including attempt/success/failure counters and last error status for that forced run.
+- periodic background task wiring remains unchanged; this endpoint is additive and does not replace scheduled updates.
+
 ---
 
 ## 11) Configuration

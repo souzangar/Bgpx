@@ -3,6 +3,8 @@
 from pathlib import Path
 import sys
 
+from dataclasses import dataclass
+
 from fastapi.testclient import TestClient
 
 
@@ -175,5 +177,54 @@ def test_get_geo_status_returns_contract_payload() -> None:
         assert isinstance(payload["counters"]["total"], int)
         assert isinstance(payload["counters"]["loaded"], int)
         assert isinstance(payload["counters"]["malformed"], int)
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_post_ipinfo_update_force_triggers_manual_downloader_cycle(monkeypatch) -> None:
+    """POST /api/ipinfo_update should be reachable and return force-update payload."""
+    reset_background_task_runner_for_tests()
+
+    @dataclass(frozen=True)
+    class _StubForceUpdateResponse:
+        status: str
+        action: str
+        attempts: int
+        success_count: int
+        failure_count: int
+        last_attempt_at: str | None
+        last_succeeded_at: str | None
+        last_error: str | None
+
+    monkeypatch.setattr(
+        "api.ip_geolocation_api.force_ipinfo_gz_update",
+        lambda: _StubForceUpdateResponse(
+            status="success",
+            action="ipinfo_gz_force_update",
+            attempts=1,
+            success_count=1,
+            failure_count=0,
+            last_attempt_at=None,
+            last_succeeded_at=None,
+            last_error=None,
+        ),
+    )
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.post("/api/ipinfo_update")
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        assert payload["status"] in {"success", "failure"}
+        assert payload["action"] == "ipinfo_gz_force_update"
+        assert isinstance(payload["attempts"], int)
+        assert isinstance(payload["success_count"], int)
+        assert isinstance(payload["failure_count"], int)
+        assert "last_attempt_at" in payload
+        assert "last_succeeded_at" in payload
+        assert "last_error" in payload
     finally:
         reset_background_task_runner_for_tests()
