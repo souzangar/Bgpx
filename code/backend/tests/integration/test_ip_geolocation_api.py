@@ -14,14 +14,15 @@ from main import create_app
 from services.background_task_runner import reset_background_task_runner_for_tests
 
 
-def test_post_ipinfo_lookup_returns_contract_payload() -> None:
-    """POST /api/ipinfo should be reachable and return lookup contract fields."""
+def test_get_ipinfo_lookup_returns_contract_payload() -> None:
+    """GET /api/ipinfo should accept JSON body and return lookup contract fields."""
     reset_background_task_runner_for_tests()
 
     try:
         app = create_app()
         with TestClient(app) as client:
-            response = client.post(
+            response = client.request(
+                "GET",
                 "/api/ipinfo",
                 json={"type": "ip", "value": "1.1.1.1"},
             )
@@ -44,22 +45,61 @@ def test_post_ipinfo_lookup_returns_contract_payload() -> None:
         reset_background_task_runner_for_tests()
 
 
-def test_post_ipinfo_lookup_returns_400_for_unsupported_type() -> None:
-    """POST /api/ipinfo should reject currently unsupported lookup types."""
+def test_get_ipinfo_lookup_supports_asn_type() -> None:
+    """GET /api/ipinfo should accept ASN JSON body and return contract payload."""
     reset_background_task_runner_for_tests()
 
     try:
         app = create_app()
         with TestClient(app) as client:
-            response = client.post(
+            response = client.request(
+                "GET",
                 "/api/ipinfo",
-                json={"type": "asn", "value": "13335"},
+                json={"type": "asn", "value": "AS13335"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        assert payload["status"] in {"success", "failure"}
+        assert payload["service_state"] in {"loading", "ready", "failed"}
+        if payload["status"] == "success":
+            assert payload["resolution_state"] in {"found", "initializing_db", "not_found"}
+            assert payload["data"]["asn"] == "AS13335"
+            assert isinstance(payload["data"]["items"], list)
+            assert isinstance(payload["data"]["total"], int)
+            if payload["data"]["items"]:
+                first = payload["data"]["items"][0]
+                assert set(first.keys()) == {
+                    "network",
+                    "country",
+                    "country_code",
+                    "continent",
+                    "continent_code",
+                }
+        else:
+            assert payload["service_state"] == "failed"
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_get_ipinfo_lookup_returns_400_for_unsupported_type() -> None:
+    """GET /api/ipinfo should reject unsupported types from JSON body."""
+    reset_background_task_runner_for_tests()
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.request(
+                "GET",
+                "/api/ipinfo",
+                json={"type": "country", "value": "US"},
             )
 
         assert response.status_code == 400
         payload = response.json()
         assert "detail" in payload
-        assert "Unsupported lookup type 'asn'" in payload["detail"]
+        assert "Unsupported lookup type 'country'" in payload["detail"]
     finally:
         reset_background_task_runner_for_tests()
 

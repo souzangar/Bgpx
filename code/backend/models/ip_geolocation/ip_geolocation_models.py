@@ -78,6 +78,34 @@ class IpGeolocationLookupDataModel:
 
 
 @dataclass(frozen=True)
+class IpGeolocationAsnSubnetItemModel:
+    """ASN lookup item containing subnet and compact geolocation fields."""
+
+    network: str
+    country: str
+    country_code: str
+    continent: str
+    continent_code: str
+
+
+@dataclass(frozen=True)
+class IpGeolocationAsnLookupDataModel:
+    """ASN lookup payload containing all matched subnet records."""
+
+    asn: str
+    items: tuple[IpGeolocationAsnSubnetItemModel, ...]
+    total: int
+
+    def __post_init__(self) -> None:
+        """Validate ASN lookup payload constraints."""
+        if not self.asn.strip():
+            raise ValueError("asn must be a non-empty string")
+
+        if self.total < 0:
+            raise ValueError("total cannot be negative")
+
+
+@dataclass(frozen=True)
 class IpGeolocationLoadCountersModel:
     """Dataset loading and parsing counters."""
 
@@ -170,7 +198,7 @@ class IpGeolocationLookupSuccessResponseModel:
     status: Literal["success"]
     service_state: ServiceState
     resolution_state: ResolutionState
-    data: IpGeolocationLookupDataModel
+    data: IpGeolocationLookupDataModel | IpGeolocationAsnLookupDataModel
 
 
 @dataclass(frozen=True)
@@ -192,6 +220,8 @@ __all__ = [
     "IpGeolocationErrorModel",
     "IpGeolocationLoadCountersModel",
     "IpGeolocationLoadStatusModel",
+    "IpGeolocationAsnLookupDataModel",
+    "IpGeolocationAsnSubnetItemModel",
     "IpGeolocationLookupDataModel",
     "IpGeolocationLookupFailureResponseModel",
     "IpGeolocationLookupRequestModel",

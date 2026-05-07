@@ -11,7 +11,13 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from infra.ip_geolocation import IpGeolocationReadResult
-from models.ip_geolocation import IpGeolocationLookupFailureResponseModel, IpGeolocationLookupSuccessResponseModel, IpGeolocationRecordModel
+from models.ip_geolocation import (
+    IpGeolocationAsnLookupDataModel,
+    IpGeolocationLookupDataModel,
+    IpGeolocationLookupFailureResponseModel,
+    IpGeolocationLookupSuccessResponseModel,
+    IpGeolocationRecordModel,
+)
 from services.ip_geolocation import IpGeolocationService
 from services.ip_geolocation.ip_geolocation_data_refresher import SourceFingerprint
 
@@ -47,6 +53,19 @@ def _record(network: str, as_name: str) -> IpGeolocationRecordModel:
         asn="AS15169",
         as_name=as_name,
         as_domain="google.com",
+    )
+
+
+def _record_with_asn(network: str, asn: str) -> IpGeolocationRecordModel:
+    return IpGeolocationRecordModel(
+        network=network,
+        country="United States",
+        country_code="US",
+        continent="North America",
+        continent_code="NA",
+        asn=asn,
+        as_name="Provider",
+        as_domain="provider.example",
     )
 
 
@@ -132,6 +151,7 @@ def test_publish_non_final_chunk_allows_found_lookup_from_loaded_chunks() -> Non
     assert payload.status == "success"
     assert payload.service_state == "loading"
     assert payload.resolution_state == "found"
+    assert isinstance(payload.data, IpGeolocationLookupDataModel)
     assert payload.data.network == "8.8.8.0/24"
 
 
@@ -145,6 +165,7 @@ def test_lookup_found_after_publish_returns_found_with_geo_payload() -> None:
     assert payload.status == "success"
     assert payload.service_state == "ready"
     assert payload.resolution_state == "found"
+    assert isinstance(payload.data, IpGeolocationLookupDataModel)
     assert payload.data.network == "8.8.8.0/24"
     assert payload.data.country_code == "US"
     assert payload.data.asn == "AS15169"
@@ -160,6 +181,64 @@ def test_lookup_unresolved_after_ready_returns_not_found() -> None:
     assert payload.status == "success"
     assert payload.service_state == "ready"
     assert payload.resolution_state == "not_found"
+
+
+def test_lookup_asn_found_after_publish_returns_found_with_geo_payload() -> None:
+    """Matched ASN lookup should return all matched subnet records."""
+    service = IpGeolocationService()
+    service.publish_snapshot(
+        IpGeolocationReadResult(
+            records=[
+                _record_with_asn("8.8.8.0/24", "AS15169"),
+                _record_with_asn("8.8.4.0/24", "AS15169"),
+                _record_with_asn("1.1.1.0/24", "AS13335"),
+            ],
+            total_lines=3,
+            malformed_lines=0,
+        ),
+        {},
+    )
+
+    payload = service.lookup_asn_geolocation("as15169")
+
+    assert payload.status == "success"
+    assert payload.service_state == "ready"
+    assert payload.resolution_state == "found"
+    assert isinstance(payload.data, IpGeolocationAsnLookupDataModel)
+    assert payload.data.asn == "AS15169"
+    assert payload.data.total == 2
+    assert len(payload.data.items) == 2
+    assert payload.data.items[0].network == "8.8.8.0/24"
+    assert payload.data.items[1].network == "8.8.4.0/24"
+
+
+def test_lookup_asn_unresolved_while_loading_returns_initializing_db() -> None:
+    """Unresolved ASN lookup during loading should map to initializing_db."""
+    service = IpGeolocationService()
+
+    payload = service.lookup_asn_geolocation("AS13335")
+
+    assert payload.status == "success"
+    assert payload.service_state == "loading"
+    assert payload.resolution_state == "initializing_db"
+    assert isinstance(payload.data, IpGeolocationAsnLookupDataModel)
+    assert payload.data.total == 0
+    assert payload.data.items == ()
+
+
+def test_lookup_asn_unresolved_after_ready_returns_not_found() -> None:
+    """Unresolved ASN lookup after readiness should map to not_found."""
+    service = IpGeolocationService()
+    service.publish_snapshot(_sample_read_result(), {})
+
+    payload = service.lookup_asn_geolocation("AS99999")
+
+    assert payload.status == "success"
+    assert payload.service_state == "ready"
+    assert payload.resolution_state == "not_found"
+    assert isinstance(payload.data, IpGeolocationAsnLookupDataModel)
+    assert payload.data.total == 0
+    assert payload.data.items == ()
 
 
 def test_failed_state_returns_failure_envelope() -> None:
@@ -257,11 +336,13 @@ def test_apply_snapshot_delta_add_remove_update_changes_snapshot() -> None:
     found_google = service.lookup_ip_geolocation("8.8.8.8")
     assert isinstance(found_google, IpGeolocationLookupSuccessResponseModel)
     assert found_google.resolution_state == "found"
+    assert isinstance(found_google.data, IpGeolocationLookupDataModel)
     assert found_google.data.as_name == "Google Updated"
 
     found_added = service.lookup_ip_geolocation("1.1.1.1")
     assert isinstance(found_added, IpGeolocationLookupSuccessResponseModel)
     assert found_added.resolution_state == "found"
+    assert isinstance(found_added.data, IpGeolocationLookupDataModel)
     assert found_added.data.as_name == "Cloudflare"
 
     removed = service.lookup_ip_geolocation("9.9.9.9")
@@ -281,4 +362,5 @@ def test_apply_snapshot_delta_noop_keeps_snapshot_and_returns_true() -> None:
     payload = service.lookup_ip_geolocation("8.8.8.8")
     assert isinstance(payload, IpGeolocationLookupSuccessResponseModel)
     assert payload.resolution_state == "found"
+    assert isinstance(payload.data, IpGeolocationLookupDataModel)
     assert payload.data.as_name == "Google LLC"

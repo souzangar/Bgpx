@@ -25,18 +25,25 @@ def lookup_ip_geolocation(ip: str) -> IpGeolocationLookupResponseModel:
     return get_ip_geolocation_service().lookup_ip_geolocation(ip)
 
 
+def lookup_asn_geolocation(asn: str) -> IpGeolocationLookupResponseModel:
+    """Resolve a requested ASN using service-layer lookup contract."""
+    return get_ip_geolocation_service().lookup_asn_geolocation(asn)
+
+
 def lookup_ip_geolocation_by_request(
     request: IpGeolocationLookupRequestModel,
 ) -> IpGeolocationLookupResponseModel:
     """Dispatch lookup request by target type and delegate to service-backed handlers."""
     if request.type == "ip":
         return lookup_ip_geolocation(request.value)
+    if request.type == "asn":
+        return lookup_asn_geolocation(request.value)
 
     raise HTTPException(
         status_code=400,
         detail=(
             f"Unsupported lookup type '{request.type}'. "
-            "Currently supported types: ['ip']."
+            "Currently supported types: ['ip', 'asn']."
         ),
     )
 

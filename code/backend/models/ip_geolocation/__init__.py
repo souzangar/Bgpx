@@ -2,6 +2,8 @@
 
 from .ip_geolocation_models import (
     EnvelopeStatus,
+    IpGeolocationAsnLookupDataModel,
+    IpGeolocationAsnSubnetItemModel,
     IpGeolocationErrorModel,
     IpGeolocationLoadCountersModel,
     IpGeolocationLoadStatusModel,
@@ -20,6 +22,8 @@ from .ip_geolocation_models import (
 
 __all__ = [
     "EnvelopeStatus",
+    "IpGeolocationAsnLookupDataModel",
+    "IpGeolocationAsnSubnetItemModel",
     "IpGeolocationErrorModel",
     "IpGeolocationLoadCountersModel",
     "IpGeolocationLoadStatusModel",

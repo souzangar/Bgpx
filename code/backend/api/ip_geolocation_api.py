@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 
 from apps.ip_geolocation import (
     get_ip_geolocation_load_status,
@@ -25,8 +25,10 @@ def _to_payload(model: object) -> dict[str, Any]:
 
 
 @router.get("/ipinfo", tags=["ip-geolocation"])
-def lookup_ip_geo(request: IpGeolocationLookupRequestModel) -> dict[str, Any]:
-    """Lookup requested geolocation using typed request target and value."""
+def lookup_ip_geo(
+    request: Annotated[IpGeolocationLookupRequestModel, Body(...)],
+) -> dict[str, Any]:
+    """Lookup requested geolocation using typed request body (GET-with-body contract)."""
     return _to_payload(lookup_ip_geolocation_by_request(request))
 
 

@@ -477,6 +477,18 @@ Planned methods:
   - on `status = success`, return `resolution_state` as `found`, `initializing_db`, or `not_found`
   - on service failures, return standard `status = failure` envelope
 
+- `lookup_asn_geolocation(asn: str) -> GeoLookupResultModel`
+  - support ASN-based lookup over active snapshot records in addition to IP lookup
+  - return **all** matching subnet rows for queried ASN (not a single IP-like payload)
+  - each ASN item contains only:
+    - `network`
+    - `country`
+    - `country_code`
+    - `continent`
+    - `continent_code`
+  - on `status = success`, return `resolution_state` as `found`, `initializing_db`, or `not_found`
+  - on service failures, return standard `status = failure` envelope
+
 - `get_ip_geolocation_load_status() -> GeoLoadStatusModel`
   - expose loading state/progress
 

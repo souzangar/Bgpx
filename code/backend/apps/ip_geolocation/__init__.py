@@ -3,6 +3,7 @@
 from .ip_geolocation_app import (
     get_ip_geolocation_load_status,
     get_ip_geolocation_service,
+    lookup_asn_geolocation,
     lookup_ip_geolocation,
     lookup_ip_geolocation_by_request,
 )
@@ -10,6 +11,7 @@ from .ip_geolocation_app import (
 __all__ = [
     "get_ip_geolocation_load_status",
     "get_ip_geolocation_service",
+    "lookup_asn_geolocation",
     "lookup_ip_geolocation",
     "lookup_ip_geolocation_by_request",
 ]
