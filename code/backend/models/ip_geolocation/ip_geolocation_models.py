@@ -93,13 +93,40 @@ class IpGeolocationAsnLookupDataModel:
     """ASN lookup payload containing all matched subnet records."""
 
     asn: str
-    items: tuple[IpGeolocationAsnSubnetItemModel, ...]
     total: int
+    items: tuple[IpGeolocationAsnSubnetItemModel, ...]
 
     def __post_init__(self) -> None:
         """Validate ASN lookup payload constraints."""
         if not self.asn.strip():
             raise ValueError("asn must be a non-empty string")
+
+        if self.total < 0:
+            raise ValueError("total cannot be negative")
+
+
+@dataclass(frozen=True)
+class IpGeolocationCountrySubnetItemModel:
+    """Country-code lookup item containing subnet and compact geo/asn fields."""
+
+    network: str
+    continent: str
+    continent_code: str
+    asn: str | None
+
+
+@dataclass(frozen=True)
+class IpGeolocationCountryLookupDataModel:
+    """Country-code lookup payload containing all matched subnet records."""
+
+    country: str
+    total: int
+    items: tuple[IpGeolocationCountrySubnetItemModel, ...]
+
+    def __post_init__(self) -> None:
+        """Validate country lookup payload constraints."""
+        if not self.country.strip():
+            raise ValueError("country must be a non-empty string")
 
         if self.total < 0:
             raise ValueError("total cannot be negative")
@@ -198,7 +225,7 @@ class IpGeolocationLookupSuccessResponseModel:
     status: Literal["success"]
     service_state: ServiceState
     resolution_state: ResolutionState
-    data: IpGeolocationLookupDataModel | IpGeolocationAsnLookupDataModel
+    data: IpGeolocationLookupDataModel | IpGeolocationAsnLookupDataModel | IpGeolocationCountryLookupDataModel
 
 
 @dataclass(frozen=True)
@@ -222,6 +249,8 @@ __all__ = [
     "IpGeolocationLoadStatusModel",
     "IpGeolocationAsnLookupDataModel",
     "IpGeolocationAsnSubnetItemModel",
+    "IpGeolocationCountryLookupDataModel",
+    "IpGeolocationCountrySubnetItemModel",
     "IpGeolocationLookupDataModel",
     "IpGeolocationLookupFailureResponseModel",
     "IpGeolocationLookupRequestModel",

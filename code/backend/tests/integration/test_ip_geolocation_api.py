@@ -83,8 +83,8 @@ def test_get_ipinfo_lookup_supports_asn_type() -> None:
         reset_background_task_runner_for_tests()
 
 
-def test_get_ipinfo_lookup_returns_400_for_unsupported_type() -> None:
-    """GET /api/ipinfo should reject unsupported types from JSON body."""
+def test_get_ipinfo_lookup_supports_country_type_as_country_code() -> None:
+    """GET /api/ipinfo should accept country type and treat value as country code."""
     reset_background_task_runner_for_tests()
 
     try:
@@ -96,10 +96,26 @@ def test_get_ipinfo_lookup_returns_400_for_unsupported_type() -> None:
                 json={"type": "country", "value": "US"},
             )
 
-        assert response.status_code == 400
+        assert response.status_code == 200
         payload = response.json()
-        assert "detail" in payload
-        assert "Unsupported lookup type 'country'" in payload["detail"]
+        assert payload["status"] in {"success", "failure"}
+        assert payload["service_state"] in {"loading", "ready", "failed"}
+
+        if payload["status"] == "success":
+            assert payload["resolution_state"] in {"found", "initializing_db", "not_found"}
+            assert payload["data"]["country"] == "US"
+            assert isinstance(payload["data"]["items"], list)
+            assert isinstance(payload["data"]["total"], int)
+            if payload["data"]["items"]:
+                first = payload["data"]["items"][0]
+                assert set(first.keys()) == {
+                    "network",
+                    "continent",
+                    "continent_code",
+                    "asn",
+                }
+        else:
+            assert payload["service_state"] == "failed"
     finally:
         reset_background_task_runner_for_tests()
 

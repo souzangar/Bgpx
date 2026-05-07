@@ -16,6 +16,8 @@ from infra.ip_geolocation import IpGeolocationReadResult
 from models.ip_geolocation import (
     IpGeolocationAsnLookupDataModel,
     IpGeolocationAsnSubnetItemModel,
+    IpGeolocationCountryLookupDataModel,
+    IpGeolocationCountrySubnetItemModel,
     IpGeolocationErrorModel,
     IpGeolocationLoadCountersModel,
     IpGeolocationLoadStatusModel,
@@ -317,6 +319,63 @@ class IpGeolocationService:
             service_state=service_state,
             resolution_state="not_found" if service_state == "ready" else "initializing_db",
             data=IpGeolocationAsnLookupDataModel(asn=normalized_asn, items=(), total=0),
+        )
+
+    def lookup_country_geolocation(self, country: str) -> IpGeolocationLookupResponseModel:
+        """Resolve all matching subnet records by country code against active snapshot."""
+        with self._lock:
+            service_state = self._service_state
+            snapshot = self._snapshot
+
+        if service_state == "failed":
+            return IpGeolocationLookupFailureResponseModel(
+                status="failure",
+                service_state="failed",
+                error=IpGeolocationErrorModel(
+                    code="IP_GEO_SERVICE_FAILED",
+                    message="IP geolocation service is in failed state",
+                ),
+            )
+
+        normalized_country_code = country.strip().upper()
+        if not normalized_country_code:
+            return IpGeolocationLookupSuccessResponseModel(
+                status="success",
+                service_state=service_state,
+                resolution_state="not_found" if service_state == "ready" else "initializing_db",
+                data=IpGeolocationCountryLookupDataModel(country=country, items=(), total=0),
+            )
+
+        matched_items: list[IpGeolocationCountrySubnetItemModel] = []
+        for entry in snapshot:
+            record = entry.record
+            if record.country_code.strip().upper() == normalized_country_code:
+                matched_items.append(
+                    IpGeolocationCountrySubnetItemModel(
+                        network=record.network,
+                        continent=record.continent,
+                        continent_code=record.continent_code,
+                        asn=record.asn,
+                    )
+                )
+
+        if matched_items:
+            return IpGeolocationLookupSuccessResponseModel(
+                status="success",
+                service_state=service_state,
+                resolution_state="found",
+                data=IpGeolocationCountryLookupDataModel(
+                    country=normalized_country_code,
+                    items=tuple(matched_items),
+                    total=len(matched_items),
+                ),
+            )
+
+        return IpGeolocationLookupSuccessResponseModel(
+            status="success",
+            service_state=service_state,
+            resolution_state="not_found" if service_state == "ready" else "initializing_db",
+            data=IpGeolocationCountryLookupDataModel(country=normalized_country_code, items=(), total=0),
         )
 
     def get_ip_geolocation_load_status(self) -> IpGeolocationLoadStatusModel:

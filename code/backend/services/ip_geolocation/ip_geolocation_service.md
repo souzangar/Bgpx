@@ -479,6 +479,7 @@ Planned methods:
 
 - `lookup_asn_geolocation(asn: str) -> GeoLookupResultModel`
   - support ASN-based lookup over active snapshot records in addition to IP lookup
+  - response `data` field order must be: `asn`, `total`, `items`
   - return **all** matching subnet rows for queried ASN (not a single IP-like payload)
   - each ASN item contains only:
     - `network`
@@ -486,6 +487,18 @@ Planned methods:
     - `country_code`
     - `continent`
     - `continent_code`
+  - on `status = success`, return `resolution_state` as `found`, `initializing_db`, or `not_found`
+  - on service failures, return standard `status = failure` envelope
+
+- `lookup_country_geolocation(country: str) -> GeoLookupResultModel`
+  - support country lookup by **country code** (for example: `US`, `DE`, `AU`)
+  - response `data` field order must be: `country`, `total`, `items`
+  - return **all** matching subnet rows for queried country code
+  - each country item contains only:
+    - `network`
+    - `continent`
+    - `continent_code`
+    - `asn`
   - on `status = success`, return `resolution_state` as `found`, `initializing_db`, or `not_found`
   - on service failures, return standard `status = failure` envelope
 
