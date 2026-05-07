@@ -79,6 +79,12 @@ Avoid:
 - Registering all endpoints directly in `main.py`
 - Mixing business logic directly inside API bridge modules
 
+Domain design discipline (strict):
+- API handlers in `code/backend/api/*` must stay **transport-only** (HTTP routing, request parsing, response mapping).
+- API handlers must **not** implement app/domain decision logic such as request-type dispatch/filtering.
+- Use-case orchestration belongs to `code/backend/apps/*`.
+- Business/domain rules belong to `code/backend/services/*`.
+
 ---
 
 ## 5) Endpoint Design Guidelines
@@ -170,3 +176,27 @@ Before merging API changes, verify:
 4. Test through `/api/...` path using integration tests
 
 This keeps routing clean and feature growth predictable.
+
+---
+
+## 12) IP Geolocation Endpoint Contract Notes
+
+Current IP geolocation lookup API contract:
+
+- **Method/Path**: `POST /api/ipinfo`
+- **Request Body**:
+
+```json
+{
+  "type": "ip",
+  "value": "1.1.1.1"
+}
+```
+
+Behavior notes:
+- `type` is a target discriminator for future lookup types.
+- Currently supported `type` value is only `"ip"`.
+- Unsupported `type` values return an intentional client error response.
+
+Status route remains:
+- `GET /api/geo/status`

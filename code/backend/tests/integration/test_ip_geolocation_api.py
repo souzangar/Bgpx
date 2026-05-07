@@ -14,14 +14,17 @@ from main import create_app
 from services.background_task_runner import reset_background_task_runner_for_tests
 
 
-def test_get_geo_lookup_returns_contract_payload() -> None:
-    """GET /api/geo/lookup should be reachable and return lookup contract fields."""
+def test_post_ipinfo_lookup_returns_contract_payload() -> None:
+    """POST /api/ipinfo should be reachable and return lookup contract fields."""
     reset_background_task_runner_for_tests()
 
     try:
         app = create_app()
         with TestClient(app) as client:
-            response = client.get("/api/geo/lookup", params={"ip": "1.1.1.1"})
+            response = client.post(
+                "/api/ipinfo",
+                json={"type": "ip", "value": "1.1.1.1"},
+            )
 
         assert response.status_code == 200
         payload = response.json()
@@ -41,14 +44,34 @@ def test_get_geo_lookup_returns_contract_payload() -> None:
         reset_background_task_runner_for_tests()
 
 
-def test_get_geo_status_returns_contract_payload() -> None:
-    """GET /api/geo/status should be reachable and return status contract fields."""
+def test_post_ipinfo_lookup_returns_400_for_unsupported_type() -> None:
+    """POST /api/ipinfo should reject currently unsupported lookup types."""
     reset_background_task_runner_for_tests()
 
     try:
         app = create_app()
         with TestClient(app) as client:
-            response = client.get("/api/geo/status")
+            response = client.post(
+                "/api/ipinfo",
+                json={"type": "asn", "value": "13335"},
+            )
+
+        assert response.status_code == 400
+        payload = response.json()
+        assert "detail" in payload
+        assert "Unsupported lookup type 'asn'" in payload["detail"]
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_get_geo_status_returns_contract_payload() -> None:
+    """GET /api/ipinfo_status should be reachable and return status contract fields."""
+    reset_background_task_runner_for_tests()
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.get("/api/ipinfo_status")
 
         assert response.status_code == 200
         payload = response.json()

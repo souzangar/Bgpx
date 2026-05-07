@@ -10,6 +10,20 @@ from typing import Literal
 ServiceState = Literal["loading", "ready", "failed"]
 EnvelopeStatus = Literal["success", "failure"]
 ResolutionState = Literal["found", "initializing_db", "not_found"]
+IpGeolocationLookupTargetType = Literal["ip", "asn", "country", "continent"]
+
+
+@dataclass(frozen=True)
+class IpGeolocationLookupRequestModel:
+    """Lookup request payload with extensible target discriminator and value."""
+
+    type: IpGeolocationLookupTargetType
+    value: str
+
+    def __post_init__(self) -> None:
+        """Validate lookup request payload constraints."""
+        if not self.value.strip():
+            raise ValueError("value must be a non-empty string")
 
 
 @dataclass(frozen=True)
@@ -180,6 +194,8 @@ __all__ = [
     "IpGeolocationLoadStatusModel",
     "IpGeolocationLookupDataModel",
     "IpGeolocationLookupFailureResponseModel",
+    "IpGeolocationLookupRequestModel",
+    "IpGeolocationLookupTargetType",
     "IpGeolocationLookupResponseModel",
     "IpGeolocationLookupSuccessResponseModel",
     "IpGeolocationRecordModel",

@@ -7,7 +7,11 @@ from typing import Any, cast
 
 from fastapi import APIRouter
 
-from apps.ip_geolocation import get_ip_geolocation_load_status, lookup_ip_geolocation
+from apps.ip_geolocation import (
+    get_ip_geolocation_load_status,
+    lookup_ip_geolocation_by_request,
+)
+from models.ip_geolocation import IpGeolocationLookupRequestModel
 
 router = APIRouter()
 
@@ -20,13 +24,13 @@ def _to_payload(model: object) -> dict[str, Any]:
     raise TypeError("IP geolocation API expected dataclass response model")
 
 
-@router.get("/geo/lookup", tags=["ip-geolocation"])
-def lookup_ip_geo(ip: str) -> dict[str, Any]:
-    """Lookup requested IP geolocation using app/service contract."""
-    return _to_payload(lookup_ip_geolocation(ip))
+@router.get("/ipinfo", tags=["ip-geolocation"])
+def lookup_ip_geo(request: IpGeolocationLookupRequestModel) -> dict[str, Any]:
+    """Lookup requested geolocation using typed request target and value."""
+    return _to_payload(lookup_ip_geolocation_by_request(request))
 
 
-@router.get("/geo/status", tags=["ip-geolocation"])
+@router.get("/ipinfo_status", tags=["ip-geolocation"])
 def get_ip_geo_status() -> dict[str, Any]:
     """Return current IP geolocation service load/refresh status."""
     return _to_payload(get_ip_geolocation_load_status())
