@@ -57,7 +57,7 @@ def lookup_ip_geolocation_by_request(
         status_code=400,
         detail=(
             f"Unsupported lookup type '{request.type}'. "
-            "Currently supported types: ['ip', 'asn', 'country', 'continent']."
+            "Currently supported types: ['ip' (e.g., 8.8.8.8, 2a11:29c0:3d88:3849::1), 'asn' (e.g., AS13335), 'country' (e.g., IR), 'continent' (e.g., AS)]."
         ),
     )
 
