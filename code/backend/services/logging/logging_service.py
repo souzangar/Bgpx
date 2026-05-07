@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from models.logging import LoggingComponentConfigModel, parse_logging_components_config
+
 
 VERBOSE_ENV = "BGPX_VERBOSE"
 LOGGING_CONFIG_PATH = Path(__file__).resolve().parents[2] / "data" / "configs" / "logging_config.json"
@@ -94,8 +96,7 @@ def _refresh_event_registry_if_needed() -> None:
         return
 
     loaded_config = _load_logging_config()
-    components = loaded_config.get("components")
-    component_map = components if isinstance(components, dict) else {}
+    component_map = parse_logging_components_config(loaded_config.get("components"))
     _EVENT_REGISTRY = LoggingEventConfigRegistry(component_map)
     _LOGGING_CONFIG_MTIME_NS = current_mtime_ns
 
@@ -103,50 +104,43 @@ def _refresh_event_registry_if_needed() -> None:
 class LoggingEventConfigRegistry:
     """Runtime registry exposing component/event logging rules from JSON config."""
 
-    def __init__(self, components: dict[str, Any]) -> None:
+    def __init__(self, components: dict[str, LoggingComponentConfigModel]) -> None:
         self._components = components
 
     def is_component_enabled(self, component: str) -> bool:
         component_config = self._components.get(component)
-        if not isinstance(component_config, dict):
+        if component_config is None:
             return True
-        return bool(component_config.get("enabled", True))
+        return component_config.enabled
 
     def is_event_enabled(self, component: str, event_id: str) -> bool:
         component_config = self._components.get(component)
-        if not isinstance(component_config, dict):
+        if component_config is None:
             return True
-        events = component_config.get("events")
-        if not isinstance(events, dict):
+        event_config = component_config.events.get(event_id)
+        if event_config is None:
             return True
-        event_config = events.get(event_id)
-        if not isinstance(event_config, dict):
-            return True
-        return bool(event_config.get("enabled", True))
+        return event_config.enabled
 
     def get_event_level(self, component: str, event_id: str, fallback_level: str) -> str:
         component_config = self._components.get(component)
-        if not isinstance(component_config, dict):
+        if component_config is None:
             return fallback_level
 
-        events = component_config.get("events")
-        if isinstance(events, dict):
-            event_config = events.get(event_id)
-            if isinstance(event_config, dict) and isinstance(event_config.get("level"), str):
-                return event_config["level"]
+        event_config = component_config.events.get(event_id)
+        if event_config is not None and event_config.level is not None:
+            return event_config.level
 
-        component_default_level = component_config.get("default_level")
-        if isinstance(component_default_level, str):
-            return component_default_level
+        if component_config.default_level is not None:
+            return component_config.default_level
         return fallback_level
 
     def get_component_logger_name(self, component: str, fallback_logger_name: str) -> str:
         component_config = self._components.get(component)
-        if not isinstance(component_config, dict):
+        if component_config is None:
             return fallback_logger_name
-        configured_logger_name = component_config.get("base_logger")
-        if isinstance(configured_logger_name, str) and configured_logger_name.strip():
-            return configured_logger_name
+        if component_config.base_logger is not None:
+            return component_config.base_logger
         return fallback_logger_name
 
 
@@ -205,9 +199,7 @@ def configure_backend_logging() -> None:
     logging_config = deepcopy(loaded_config)
     _apply_verbose_levels(logging_config)
 
-    components = logging_config.get("components")
-    component_map = components if isinstance(components, dict) else {}
-
+    component_map = parse_logging_components_config(loaded_config.get("components"))
     _EVENT_REGISTRY = LoggingEventConfigRegistry(component_map)
     _LOGGING_CONFIG_MTIME_NS = _read_logging_config_mtime_ns()
     logging.config.dictConfig(logging_config)

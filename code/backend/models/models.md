@@ -133,4 +133,15 @@ Before merging model changes, verify:
 - Embedding business behavior in model classes
 - Evolving contracts silently without updating dependent layers/tests
 
+---
+
+## 11) Logging Models Documentation Source
+
+For logging-related models:
+- Implementation lives in `code/backend/models/logging/logging_models.py`
+- Canonical documentation lives in this file (`code/backend/models/models.md`)
+
+To avoid developer confusion, do **not** maintain a separate layer markdown file at
+`code/backend/models/logging/logging.md`.
+
 This layer is the contract backbone of the backend — keep it clean and authoritative.

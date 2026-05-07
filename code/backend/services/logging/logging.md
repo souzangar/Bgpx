@@ -63,6 +63,13 @@ Optional custom section supported by this service:
   - component default level
   - component base logger override
 
+Note:
+- Shared DTO/data-shape ownership for `components` now lives in:
+  - `code/backend/models/logging/logging_models.py`
+- Service layer parses raw config using:
+  - `parse_logging_components_config(...)`
+- Service layer remains responsible for runtime orchestration and logger emission decisions.
+
 ---
 
 ## 4) Core Runtime Behaviors
@@ -120,7 +127,7 @@ If unchanged:
 
 ### 6.1 `LoggingEventConfigRegistry`
 
-Provides config-driven policy methods:
+Provides config-driven policy methods over typed models imported from `models.logging`:
 - `is_component_enabled(component)`
 - `is_event_enabled(component, event_id)`
 - `get_event_level(component, event_id, fallback_level)`

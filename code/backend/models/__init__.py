@@ -30,6 +30,11 @@ from .ip_geolocation import (
     ResolutionState,
     ServiceState,
 )
+from .logging import (
+    LoggingComponentConfigModel,
+    LoggingEventConfigModel,
+    parse_logging_components_config,
+)
 from .ping import PingResultModel
 from .traceroute import TracerouteHopModel, TracerouteResultModel
 
@@ -52,7 +57,10 @@ __all__ = [
     "IpGeolocationRecordModel",
     "IpGeolocationRefreshMetadataModel",
     "IpGeolocationSourceFingerprintModel",
+    "LoggingComponentConfigModel",
+    "LoggingEventConfigModel",
     "OverlapPolicy",
+    "parse_logging_components_config",
     "PingResultModel",
     "ResolutionState",
     "RetryBackoffConfig",
