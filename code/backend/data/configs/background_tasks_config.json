@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "ip_geolocation": {
+    "resource_key": "ip_geolocation_database_handler",
+    "tasks": {
+      "bootstrap_once": {
+        "task_id": "ip_geolocation_bootstrap_once",
+        "interval_seconds": 0.5,
+        "resource_sequence": 5,
+        "stop_after_success": true,
+        "enabled": true
+      },
+      "ipinfo_gz_downloader": {
+        "task_id": "ip_geolocation_ipinfo_gz_downloader",
+        "interval_seconds": 5.0,
+        "resource_sequence": 10,
+        "enabled": true
+      },
+      "data_refresh": {
+        "task_id": "ip_geolocation_data_refresh",
+        "interval_seconds": 5.0,
+        "resource_sequence": 20,
+        "enabled": true
+      }
+    }
+  }
+}

@@ -1,367 +1,222 @@
-# Background Task Runner Service Plan (`background_task_runner.py`)
+# Background Task Runner Service (`background_task_runner` package)
 
-This document defines the design and implementation plan for the generic backend background task runner service.
+This document describes the **current implemented state** of the background task runner subsystem.
 
-Location target:
-- Service doc: `code/backend/services/background_task_runner_service.md`
-- Planned service module:
-  - `code/backend/services/background_task_runner/background_task_runner.py`
-- Shared contract models:
-  - `code/backend/models/background_task_runner/background_task_runner_models.py`
-
-Related docs:
-- IP geolocation integration plan: `code/backend/services/ip_geolocation_service.md`
+Location:
+- Service package: `code/backend/services/background_task_runner/`
+- Runtime core: `code/backend/services/background_task_runner/background_task_runner.py`
+- Config service: `code/backend/services/background_task_runner/background_task_config_service.py`
+- FastAPI lifespan wiring: `code/backend/services/background_task_runner/ip_geolocation_lifespan.py`
+- Shared models: `code/backend/models/background_task_runner/background_task_runner_models.py`
 
 ---
 
 ## 1) Purpose
 
-`background_task_runner.py` is a **cross-domain runtime utility service** responsible for:
-- registering background tasks,
-- scheduling and repeatedly executing task loops,
-- preventing duplicate/overlapping task execution,
-- handling task lifecycle (start/stop/cancel),
-- containing task exceptions and applying retry/backoff behavior.
+The background task runner is a **domain-agnostic runtime orchestrator** that manages process-local periodic/background jobs.
 
-It must remain **domain-agnostic** and reusable for current/future features (not just IP geolocation).
+It is responsible for:
+- task registration/unregistration,
+- per-task loop start/stop lifecycle,
+- overlap prevention,
+- bounded retry/backoff after failures,
+- observable per-task runtime status,
+- in-process singleton ownership for app lifespan wiring.
 
----
-
-## 2) Layer Position and Boundaries
-
-Expected flow:
-
-`api -> apps -> services -> infra/models`
-
-`background_task_runner` is part of `services`, but acts as a reusable runtime orchestration utility.
-
-Boundary rules:
-- Keep `background_task_runner` generic (looping, cancellation, interval scheduling, error boundaries).
-- Keep domain refresh logic in domain-specific service modules (example: `ip_geolocation_data_refresher`).
-- Do **not** place domain tasks under runner-specific directories like `background_task_runner/tasks/...`.
+Domain-specific logic (e.g. IP geolocation dataset refresh/downloader behavior) remains outside the runner.
 
 ---
 
-## 3) Planned Package Structure
+## 2) Package Surface and Exports
 
-```text
-code/backend/services/
-  background_task_runner/
-    background_task_runner.py
+`services/background_task_runner/__init__.py` exports:
+- model contracts from `models.background_task_runner`:
+  - `BackgroundTaskDefinition`, `BackgroundTaskStatus`
+  - `RetryBackoffConfig`, `OverlapPolicy`
+  - `TaskCallable` (+ sync/async aliases)
+- runtime API:
+  - `BackgroundTaskRunner`
+  - `get_background_task_runner()`
+  - `reset_background_task_runner_for_tests()`
+- app lifespan hook:
+  - `app_lifespan`
 
-code/backend/models/
-  background_task_runner/
-    background_task_runner_models.py
-    __init__.py
-```
-
-Potential companion modules (optional as complexity grows):
-- `policies.py` (overlap/backoff policy enums)
-- `task_state.py` (runtime state models)
-
----
-
-## 4) Core Runtime Guarantees
-
-`background_task_runner` should enforce these guarantees for every registered task:
-
-1. **Single active task per `task_id`**
-   - Keep a task registry keyed by `task_id`.
-   - `start(task_id)` is idempotent: if already running, do not start a duplicate loop.
-
-2. **No overlapping executions for the same task**
-   - Guard each execution with a per-task run lock/flag.
-   - Default overlap policy for polling tasks: `SKIP_IF_RUNNING` (best throughput, no queue buildup).
-   - Optional policies for specific tasks: `QUEUE_ONE` or `RESTART`.
-
-3. **Short critical sections only**
-   - Locks in runner protect only registry/state transitions (start/stop/run markers), not task body work.
-   - This avoids global coarse locks and keeps scheduling overhead low.
-
-4. **Idempotent stop + graceful cancellation**
-   - `stop(task_id)` can be called multiple times safely.
-   - Cancellation boundaries should prevent zombie loops and double-stop races.
-
-5. **Error boundary and backoff policy**
-   - Task exceptions are contained per task.
-   - Retry with bounded backoff/jitter to avoid hot error loops and contention spikes.
+This makes the package a single integration boundary for startup wiring and tests.
 
 ---
 
-## 5) Task Contracts
+## 3) Task Contract (Implemented)
 
-Recommended contract shape for registered tasks:
+From `background_task_runner_models.py`:
 
-- `task_id: str` (unique key)
-- `interval_seconds: float`
-- `run_once() -> None | Awaitable[None]`
-- `overlap_policy` (default `SKIP_IF_RUNNING`)
-- Optional retry/backoff config (base delay, max delay, jitter)
+- `BackgroundTaskDefinition`
+  - `task_id: str` (unique, non-empty)
+  - `interval_seconds: float` (> 0)
+  - `run_once: TaskCallable` (sync or async)
+  - `resource_key: str` (non-empty)
+  - `resource_sequence: int` (>= 0)
+  - `stop_after_success: bool` (one-shot behavior)
+  - `overlap_policy: OverlapPolicy` (default `SKIP_IF_RUNNING`)
+  - `retry_backoff: RetryBackoffConfig`
 
-Registration behavior:
-- `register(task)` should fail fast on duplicate `task_id` unless explicitly configured for replacement.
-- `unregister(task_id)` should stop task first (if running), then remove from registry.
+- `BackgroundTaskStatus`
+  - `is_running`
+  - `last_run_started_at`
+  - `last_run_succeeded_at`
+  - `last_error_message`
+  - `consecutive_failure_count`
+  - `total_runs`
+  - `skipped_overlap_runs`
+
+Validation is performed in model `__post_init__` methods.
 
 ---
 
-## 6) Lifecycle Interface (Planned)
+## 4) Runtime Behavior (Implemented)
 
-Method naming examples:
-- `start_background_task_runner()`
-- `stop_background_task_runner()`
-- `register_background_task(task)`
-- `start_background_task(task_id)`
-- `stop_background_task(task_id)`
+### 4.1 Registry and lifecycle
+
+`BackgroundTaskRunner` keeps:
+- registry keyed by `task_id`,
+- resource-group state keyed by `resource_key`,
+- runner lifecycle flag,
+- task loop/run handles,
+- sync executor for non-async callables.
+
+Public lifecycle API:
+- `start_background_task_runner()` / `stop_background_task_runner()` (idempotent)
+- `register_background_task(task)` / `unregister_background_task(task_id)`
+- `start_background_task(task_id)` / `stop_background_task(task_id)` (idempotent)
 - `get_background_task_status(task_id)`
 
-Behavioral expectations:
-- runner-level `start`/`stop` should be idempotent,
-- task-level `start`/`stop` should be idempotent,
-- stopping runner should safely stop/cancel all running tasks.
+### 4.2 Scheduling and overlap
+
+Per task:
+- one loop coroutine (`_run_registered_task_loop`) ticks by `interval_seconds`.
+
+Current overlap behavior:
+- effective safe behavior is skip-if-running,
+- `OverlapPolicy` enum includes `QUEUE_ONE` and `RESTART`, but these are currently future-ready contract values; runner behavior remains conservative skip semantics.
+
+### 4.3 Resource-group sequencing
+
+Tasks sharing the same `resource_key` are sequenced by:
+1. `resource_sequence` ascending,
+2. `task_id` lexical tie-break.
+
+Resource-group coordination includes:
+- `active_task_id` lock-like ownership,
+- `next_task_id_turn` rotation,
+- normalization of turn pointer,
+- immediate peer scheduling after run completion to reduce starvation/phase-alignment delays.
+
+### 4.4 Failure handling and backoff
+
+Run failures are contained per task and update status:
+- increment `consecutive_failure_count`,
+- set `last_error_message`,
+- compute bounded exponential backoff with jitter,
+- set `next_eligible_run_at_monotonic`.
+
+On success:
+- set `last_run_succeeded_at`,
+- clear `last_error_message`,
+- reset `consecutive_failure_count`,
+- clear backoff delay.
+
+### 4.5 One-shot task behavior
+
+If `stop_after_success=True`, task loop is marked stopped after first successful run (without cancelling its currently running execution). This is used by the bootstrap IP geolocation task.
 
 ---
 
-## 7) Observability and Health Signals
+## 5) Config Service (`background_task_config_service.py`)
 
-Expose at least task-level runtime metadata:
-- `task_id`
-- running/not-running state
-- last run start timestamp
-- last run success timestamp
-- last error message (if any)
-- consecutive failure count
+Configuration source:
+- `code/backend/data/configs/background_tasks_config.json`
 
-Optional metrics:
-- total runs
-- skipped runs due to overlap
-- average run duration
-- retry/backoff counters
+Service guarantees:
+- strict JSON shape validation,
+- typed dataclass projection:
+  - `BackgroundTasksConfig`
+  - `IpGeolocationConfig`
+  - `IpGeolocationTaskConfig`
+- mtime-based in-memory cache refresh (`get_background_tasks_config()`),
+- explicit test reset hook (`reset_background_task_config_cache_for_tests()`).
 
----
-
-## 8) Integration Pattern (IP Geolocation Example)
-
-For geolocation source watch/reload:
-
-1. `ip_geolocation_data_refresher` defines domain logic:
-   - source fingerprint check (`inode + mtime_ns`),
-   - debounce and reload decision,
-   - snapshot rebuild + atomic swap.
-
-2. `background_task_runner` hosts lifecycle and scheduling:
-   - starts/stops refresher polling loop,
-   - enforces no-overlap policy,
-   - handles exceptions/retries.
-
-This keeps domain correctness and platform runtime responsibilities cleanly separated.
+Current config supports:
+- top-level `version`,
+- `ip_geolocation.resource_key`,
+- task map entries with:
+  - `task_id`, `interval_seconds`, `resource_sequence`, `enabled`, `stop_after_success`.
 
 ---
 
-## 9) FastAPI Wiring and Automatic Server Startup
+## 6) FastAPI Lifespan Wiring (Current)
 
-The intended runtime model is **in-process background execution bound to FastAPI app lifecycle**.
-This means the runner starts when the backend app starts, and stops when the app stops.
+`main.py` wires app lifespan via:
+- `from services.background_task_runner.ip_geolocation_lifespan import app_lifespan`
+- `FastAPI(..., lifespan=app_lifespan)`
 
-### 9.1 Startup/shutdown flow with current `main.py`
+`ip_geolocation_lifespan.py` startup flow:
+1. start runner,
+2. initialize IP geolocation service dataset,
+3. build downloader + refresher domain services,
+4. load validated config,
+5. map configured task keys to callables,
+6. register enabled tasks idempotently,
+7. start enabled tasks.
 
-Current server boot path in `code/backend/main.py` is:
-- `uvicorn.run("main:create_app", factory=True, ...)`
+Shutdown flow:
+1. stop enabled tasks idempotently,
+2. unregister enabled tasks idempotently,
+3. stop runner.
 
-With this pattern, the intended wiring is:
+Required task keys expected in config:
+- `bootstrap_once`
+- `ipinfo_gz_downloader`
+- `data_refresh`
 
-1. Uvicorn calls `create_app(...)`.
-2. `create_app(...)` returns `FastAPI(..., lifespan=...)`.
-3. In lifespan startup:
-   - instantiate/get `background_task_runner`,
-   - call `start_background_task_runner()`,
-   - register domain task(s),
-   - call `start_background_task(task_id)`.
-4. App serves API traffic while task loops run in background.
-5. In lifespan shutdown:
-   - stop specific task(s) if needed,
-   - call `stop_background_task_runner()` to cancel and cleanup gracefully.
-
-### 9.2 Concrete wiring shape for `main.py`
-
-Illustrative integration shape (kept generic, aligned to current `create_app` factory usage):
-
-```python
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
-
-
-@asynccontextmanager
-async def _app_lifespan(app: FastAPI):
-    # Resolve/create singleton runner instance for this process.
-    runner = get_background_task_runner()
-
-    # Example domain task creation (e.g. IP geolocation source watch).
-    geo_refresh_task = build_ip_geolocation_refresh_task()
-
-    runner.start_background_task_runner()
-    runner.register_background_task(geo_refresh_task)
-    runner.start_background_task(geo_refresh_task.task_id)
-
-    try:
-        yield
-    finally:
-        # Idempotent stop calls are expected by contract.
-        runner.stop_background_task(geo_refresh_task.task_id)
-        runner.stop_background_task_runner()
-
-
-def create_app(frontend_mode: str | None = None, frontend_dev_url: str | None = None) -> FastAPI:
-    app = FastAPI(
-        title="BGPX Backend",
-        version="0.1.0",
-        lifespan=_app_lifespan,
-    )
-    # existing router/static wiring continues here
-    return app
-```
-
-Notes:
-- This design does **not** require a separate OS service/daemon for the runner.
-- The runner is a managed background subsystem of the FastAPI process.
-
-### 9.3 Reload and process model considerations (`reload=True`)
-
-Your current `main.py` runs Uvicorn with `reload=True`.
-Design expectations under reload:
-
-- On code change, old process receives shutdown -> lifespan cleanup should stop tasks/runner.
-- New process starts -> lifespan startup should start runner/tasks again.
-- Runner/task APIs must remain idempotent (`start`/`stop`) to handle restarts safely.
-
-If multi-worker mode is introduced in future, each worker process would run its own in-process runner
-unless explicitly coordinated. For singleton global tasks, add cross-process coordination policy.
+If none are enabled, startup raises runtime error.
 
 ---
 
-## 10) Minimal Integration Checklist
+## 7) Testing Coverage (Current)
 
-1. Implement `background_task_runner` module and lifecycle APIs from section 6.
-2. Implement domain task factory (example: IP geolocation refresher task contract).
-3. Add FastAPI lifespan function in `main.py`.
-4. Start runner + register/start tasks in lifespan startup.
-5. Stop tasks + runner in lifespan shutdown.
-6. Verify behavior with `reload=True` (no duplicate loops after restart).
-7. Add integration tests for startup/shutdown/background loop continuity.
+Key tests include:
 
----
+- Unit:
+  - `code/backend/tests/unit/test_background_task_runner.py`
+  - `code/backend/tests/unit/test_background_task_config_service.py`
 
-## 11) Testing Plan
+- Integration:
+  - `code/backend/tests/integration/test_app_lifespan_background_task_runner.py`
 
-Unit tests:
-- idempotent start/stop behavior
-- no duplicate task loops for same `task_id`
-- overlap behavior for each policy (`SKIP_IF_RUNNING` at minimum)
-- cancellation and shutdown behavior
-- exception containment and retry/backoff behavior
-- registry consistency under start/stop/register/unregister races
-
-Integration tests:
-- runner + geolocation refresher collaboration
-- file-change poll task continues after transient failures
-- no double execution under rapid trigger conditions
+Integration scenarios verify:
+- app lifespan starts/stops runner,
+- IP geolocation tasks are running during app lifetime,
+- tasks are cleaned on shutdown,
+- bootstrap task stops after first successful run while sequenced periodic tasks continue.
 
 ---
 
-## 12) Summary
+## 8) Design Boundaries and Notes
 
-This dedicated runner plan keeps:
-- reusable background task mechanics centralized,
-- domain services focused on business/data correctness,
-- future background features easy to plug in without redesign.
+- Runner package remains reusable and domain-agnostic.
+- Domain work stays in `services/ip_geolocation/*`.
+- Lifecycle orchestration for domain tasks lives in dedicated lifespan module (`ip_geolocation_lifespan.py`), not in `main.py` directly.
+- Runtime is in-process; with multi-worker deployment, each worker would own its own runner unless explicit cross-process coordination is introduced.
 
 ---
 
-## 13) Step-by-Step Implementation Action Plan
+## 9) Quick Reference
 
-This section captures the concrete execution plan to implement the background task runner service in code.
+- Start runner: `runner.start_background_task_runner()`
+- Register: `runner.register_background_task(task_def)`
+- Start task: `runner.start_background_task(task_id)`
+- Read status: `runner.get_background_task_status(task_id)`
+- Stop task: `runner.stop_background_task(task_id)`
+- Unregister: `runner.unregister_background_task(task_id)`
+- Stop runner: `runner.stop_background_task_runner()`
 
-1. **Create package skeleton**
-   - Add `code/backend/services/background_task_runner/`
-   - Add:
-     - `__init__.py`
-     - `background_task_runner.py`
-   - Add `code/backend/models/background_task_runner/`:
-     - `background_task_runner_models.py`
-     - `__init__.py`
-
-2. **Define task contracts and policies (`models/background_task_runner/background_task_runner_models.py`)**
-   - Define typed task contract fields:
-     - `task_id: str`
-     - `interval_seconds: float`
-     - `run_once` (sync or async callable)
-   - Define overlap policies:
-     - `SKIP_IF_RUNNING` (default)
-     - optional future-ready values: `QUEUE_ONE`, `RESTART`
-   - Define retry/backoff config:
-     - base delay, max delay, jitter ratio
-   - Define runtime status model for observability.
-
-3. **Implement `BackgroundTaskRunner` core state machine (`background_task_runner.py`)**
-   - Add registry keyed by `task_id`.
-   - Add per-task runtime state storage.
-   - Add synchronization primitives with short critical sections.
-
-4. **Implement lifecycle API with idempotency guarantees**
-   - Runner-level:
-     - `start_background_task_runner()`
-     - `stop_background_task_runner()`
-   - Task-level:
-     - `register_background_task(task)`
-     - `unregister_background_task(task_id)`
-     - `start_background_task(task_id)`
-     - `stop_background_task(task_id)`
-     - `get_background_task_status(task_id)`
-   - Ensure duplicate starts are prevented and repeated stops are safe.
-
-5. **Implement scheduling loop + overlap handling**
-   - Run one loop coroutine per started task.
-   - Enforce no-overlap behavior for the same `task_id`.
-   - Fully implement `SKIP_IF_RUNNING` in first iteration.
-
-6. **Implement exception boundary + retry/backoff behavior**
-   - Catch and isolate task exceptions per loop.
-   - Track consecutive failures and last error.
-   - Apply bounded backoff + jitter to avoid hot error loops.
-   - Reset failure counters on successful run.
-
-7. **Expose process-local runner accessor**
-   - Provide a simple singleton/factory accessor for app-lifecycle wiring.
-   - Keep deterministic in-process behavior for current deployment mode.
-
-8. **Wire runner into FastAPI lifespan (`code/backend/main.py`)**
-   - Add lifespan context manager.
-   - Startup:
-     - resolve/create runner
-     - start runner
-     - register + start domain task(s) when available
-   - Shutdown:
-     - stop running tasks
-     - stop runner idempotently.
-
-9. **Add unit tests for runner behavior**
-   - Add `code/backend/tests/unit/test_background_task_runner.py`.
-   - Cover:
-     - runner start/stop idempotency
-     - duplicate loop prevention
-     - overlap `SKIP_IF_RUNNING`
-     - cancellation behavior
-     - exception containment and retry/backoff
-     - register/unregister lifecycle consistency.
-
-10. **Add integration lifecycle test**
-    - Verify app lifespan startup/shutdown cleanly starts/stops background tasks.
-    - Verify no zombie task loop remains after shutdown.
-
-11. **Prepare hook for IP geolocation refresher integration**
-    - Keep domain refresher logic outside the runner.
-    - Use runner only for lifecycle/scheduling/overlap/error boundaries.
-
-12. **Validate and harden**
-    - Run backend test suite.
-    - Confirm `reload=True` behavior does not leave duplicate loops after reload restarts.
-    - Confirm service-layer boundary compliance per `code/backend/services/README.md`.
+For app wiring, prefer using exported `app_lifespan` rather than duplicating lifecycle logic in `main.py`.
