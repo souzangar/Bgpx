@@ -20,7 +20,7 @@ from services.ip_geolocation.ip_geolocation_data_refresher import IpGeolocationD
 
 
 IP_GEO_BOOTSTRAP_TASK_KEY = "bootstrap_once"
-IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_KEY = "ipinfo_gz_downloader"
+IP_GEO_IPINFO_GZ_EXTRACTOR_TASK_KEY = "ipinfo_gz_extractor"
 IP_GEO_REFRESH_TASK_KEY = "data_refresh"
 
 
@@ -60,7 +60,7 @@ async def app_lifespan(_app: FastAPI):
 
     ip_geolocation_service = get_ip_geolocation_service()
     ip_geolocation_service.initialize_ip_geolocation_dataset()
-    ip_geolocation_downloader = IpGeolocationIpinfoGzExtractor()
+    ip_geolocation_extractor = IpGeolocationIpinfoGzExtractor()
     ip_geolocation_refresher = IpGeolocationDataRefresher(
         publish_snapshot=ip_geolocation_service.publish_snapshot,
         is_snapshot_equivalent=ip_geolocation_service.is_snapshot_equivalent,
@@ -76,14 +76,14 @@ async def app_lifespan(_app: FastAPI):
         if bootstrap_completed:
             return
 
-        await asyncio.to_thread(ip_geolocation_downloader.run_once)
+        await asyncio.to_thread(ip_geolocation_extractor.run_once)
         await asyncio.to_thread(ip_geolocation_refresher.run_once)
 
         bootstrap_completed = True
 
     run_callable_map = {
         IP_GEO_BOOTSTRAP_TASK_KEY: _run_bootstrap_once,
-        IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_KEY: ip_geolocation_downloader.run_once,
+        IP_GEO_IPINFO_GZ_EXTRACTOR_TASK_KEY: ip_geolocation_extractor.run_once,
         IP_GEO_REFRESH_TASK_KEY: ip_geolocation_refresher.run_once,
     }
 
@@ -92,7 +92,7 @@ async def app_lifespan(_app: FastAPI):
 
     for required_task_key in (
         IP_GEO_BOOTSTRAP_TASK_KEY,
-        IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_KEY,
+        IP_GEO_IPINFO_GZ_EXTRACTOR_TASK_KEY,
         IP_GEO_REFRESH_TASK_KEY,
     ):
         configured_task = configured_tasks_by_key.get(required_task_key)

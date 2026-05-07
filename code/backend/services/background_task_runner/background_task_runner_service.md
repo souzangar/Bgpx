@@ -23,7 +23,7 @@ It is responsible for:
 - observable per-task runtime status,
 - in-process singleton ownership for app lifespan wiring.
 
-Domain-specific logic (e.g. IP geolocation dataset refresh/downloader behavior) remains outside the runner.
+Domain-specific logic (e.g. IP geolocation dataset refresh/extractor behavior) remains outside the runner.
 
 ---
 
@@ -161,7 +161,7 @@ Current config supports:
 `ip_geolocation_lifespan.py` startup flow:
 1. start runner,
 2. initialize IP geolocation service dataset,
-3. build downloader + refresher domain services,
+3. build extractor + refresher domain services,
 4. load validated config,
 5. map configured task keys to callables,
 6. register enabled tasks idempotently,
@@ -174,7 +174,7 @@ Shutdown flow:
 
 Required task keys expected in config:
 - `bootstrap_once`
-- `ipinfo_gz_downloader`
+- `ipinfo_gz_extractor`
 - `data_refresh`
 
 If none are enabled, startup raises runtime error.

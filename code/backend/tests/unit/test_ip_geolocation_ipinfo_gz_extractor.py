@@ -1,4 +1,4 @@
-"""Unit tests for dedicated IP geolocation .gz downloader/watcher behavior."""
+"""Unit tests for dedicated IP geolocation .gz extractor/watcher behavior."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _raise_file_not_found(_path: object) -> _FakeStat:
     raise FileNotFoundError()
 
 
-def test_downloader_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
+def test_extractor_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
     """Second run with unchanged .gz fingerprint should not trigger sync."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
@@ -46,7 +46,7 @@ def test_downloader_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
     def _stat_func(_path: object) -> _FakeStat:
         return fingerprints.pop(0)
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -54,18 +54,18 @@ def test_downloader_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
         sleep_func=lambda _seconds: None,
     )
 
-    downloader.run_once()
+    extractor.run_once()
     first_content = working_path.read_text(encoding="utf-8")
-    downloader.run_once()
+    extractor.run_once()
     second_content = working_path.read_text(encoding="utf-8")
 
-    assert downloader.sync_attempt_count == 1
+    assert extractor.sync_attempt_count == 1
     assert first_content == '{"a":1}\n'
     assert second_content == '{"a":1}\n'
     assert temp_path.exists() is False
 
 
-def test_downloader_replaces_working_file_when_content_differs(tmp_path: Path) -> None:
+def test_extractor_replaces_working_file_when_content_differs(tmp_path: Path) -> None:
     """Changed .gz content should replace working JSON and cleanup static temp file."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
@@ -73,7 +73,7 @@ def test_downloader_replaces_working_file_when_content_differs(tmp_path: Path) -
     _write_gz(gz_path, '{"a":2}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -81,15 +81,15 @@ def test_downloader_replaces_working_file_when_content_differs(tmp_path: Path) -
         sleep_func=lambda _seconds: None,
     )
 
-    downloader.run_once()
+    extractor.run_once()
 
     assert working_path.read_text(encoding="utf-8") == '{"a":2}\n'
     assert temp_path.exists() is False
-    assert downloader.sync_attempt_count == 1
-    assert downloader.sync_success_count == 1
+    assert extractor.sync_attempt_count == 1
+    assert extractor.sync_success_count == 1
 
 
-def test_downloader_keeps_working_file_when_content_is_same(tmp_path: Path) -> None:
+def test_extractor_keeps_working_file_when_content_is_same(tmp_path: Path) -> None:
     """Identical extracted content should not alter working file and should cleanup temp file."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
@@ -97,7 +97,7 @@ def test_downloader_keeps_working_file_when_content_is_same(tmp_path: Path) -> N
     _write_gz(gz_path, '{"a":1}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -105,17 +105,17 @@ def test_downloader_keeps_working_file_when_content_is_same(tmp_path: Path) -> N
         sleep_func=lambda _seconds: None,
     )
 
-    downloader.run_once()
+    extractor.run_once()
 
     assert working_path.read_text(encoding="utf-8") == '{"a":1}\n'
     assert temp_path.exists() is False
-    assert downloader.sync_success_count == 1
+    assert extractor.sync_success_count == 1
 
 
-def test_downloader_handles_missing_gz_as_noop(tmp_path: Path) -> None:
+def test_extractor_handles_missing_gz_as_noop(tmp_path: Path) -> None:
     """Missing .gz source should return silently without failed sync accounting."""
     gz_path = tmp_path / "missing.json.gz"
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=tmp_path / "ipinfo_lite.json",
         temp_dataset_path=tmp_path / "ipinfo_lite.tmp.json",
@@ -123,20 +123,20 @@ def test_downloader_handles_missing_gz_as_noop(tmp_path: Path) -> None:
         sleep_func=lambda _seconds: None,
     )
 
-    downloader.run_once()
+    extractor.run_once()
 
-    assert downloader.sync_attempt_count == 0
-    assert downloader.sync_failure_count == 0
+    assert extractor.sync_attempt_count == 0
+    assert extractor.sync_failure_count == 0
 
 
-def test_downloader_cleans_static_temp_file_on_failure(tmp_path: Path) -> None:
+def test_extractor_cleans_static_temp_file_on_failure(tmp_path: Path) -> None:
     """Temp file must be deleted even when extraction/comparison flow fails."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
     temp_path = tmp_path / "ipinfo_lite.tmp.json"
     _write_gz(gz_path, '{"a":1}\n')
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -147,15 +147,15 @@ def test_downloader_cleans_static_temp_file_on_failure(tmp_path: Path) -> None:
     def _raise_after_extract() -> bool:
         raise RuntimeError("compare failed")
 
-    downloader._should_replace_working_dataset = _raise_after_extract  # type: ignore[method-assign]
-    downloader.run_once()
+    extractor._should_replace_working_dataset = _raise_after_extract  # type: ignore[method-assign]
+    extractor.run_once()
 
-    assert downloader.sync_failure_count == 1
-    assert downloader.last_sync_error == "compare failed"
+    assert extractor.sync_failure_count == 1
+    assert extractor.last_sync_error == "compare failed"
     assert temp_path.exists() is False
 
 
-def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> None:
+def test_extractor_info_logs_show_refresh_events(caplog, tmp_path: Path) -> None:
     """INFO level should emit state-change sync logs."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
@@ -163,7 +163,7 @@ def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> Non
     _write_gz(gz_path, '{"a":2}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -172,7 +172,7 @@ def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> Non
     )
 
     with caplog.at_level(logging.INFO, logger="bgpx.tasks.ip_geo.ipinfo_gz_extractor"):
-        downloader.run_once()
+        extractor.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("source change detected" in message for message in messages)
@@ -180,15 +180,15 @@ def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> Non
     assert all("poll tick" not in message for message in messages)
 
 
-def test_downloader_warning_level_suppresses_info_and_debug_logs(caplog, tmp_path: Path) -> None:
-    """WARNING level should suppress routine downloader logs."""
+def test_extractor_warning_level_suppresses_info_and_debug_logs(caplog, tmp_path: Path) -> None:
+    """WARNING level should suppress routine extractor logs."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     working_path = tmp_path / "ipinfo_lite.json"
     temp_path = tmp_path / "ipinfo_lite.tmp.json"
     _write_gz(gz_path, '{"a":2}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -197,12 +197,12 @@ def test_downloader_warning_level_suppresses_info_and_debug_logs(caplog, tmp_pat
     )
 
     with caplog.at_level(logging.WARNING, logger="bgpx.tasks.ip_geo.ipinfo_gz_extractor"):
-        downloader.run_once()
+        extractor.run_once()
 
     assert caplog.records == []
 
 
-def test_downloader_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -> None:
+def test_extractor_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -> None:
     """DEBUG level should include per-cycle unchanged diagnostics."""
     gz_path = tmp_path / "ipinfo_lite.json.gz"
     _write_gz(gz_path, '{"a":2}\n')
@@ -212,7 +212,7 @@ def test_downloader_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -
     def _stat_func(_path: object) -> _FakeStat:
         return fingerprints.pop(0)
 
-    downloader = IpGeolocationIpinfoGzExtractor(
+    extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=tmp_path / "ipinfo_lite.json",
         temp_dataset_path=tmp_path / "ipinfo_lite.tmp.json",
@@ -221,8 +221,8 @@ def test_downloader_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -
     )
 
     with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.ipinfo_gz_extractor"):
-        downloader.run_once()
-        downloader.run_once()
+        extractor.run_once()
+        extractor.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("poll tick started" in message for message in messages)

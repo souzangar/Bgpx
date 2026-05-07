@@ -26,7 +26,7 @@ def test_get_background_tasks_config_returns_valid_ip_geo_defaults() -> None:
 
         task_by_key = {task.task_key: task for task in config.ip_geolocation.tasks}
         assert task_by_key["bootstrap_once"].task_id == "ip_geolocation_bootstrap_once"
-        assert task_by_key["ipinfo_gz_downloader"].task_id == "ip_geolocation_ipinfo_gz_downloader"
+        assert task_by_key["ipinfo_gz_extractor"].task_id == "ip_geolocation_ipinfo_gz_extractor"
         assert task_by_key["data_refresh"].task_id == "ip_geolocation_data_refresh"
     finally:
         config_service.reset_background_task_config_cache_for_tests()
@@ -60,7 +60,7 @@ def test_get_background_tasks_config_reloads_when_file_mtime_changes(tmp_path: P
                     "enabled": True,
                     "stop_after_success": True,
                 },
-                "ipinfo_gz_downloader": {
+                "ipinfo_gz_extractor": {
                     "task_id": "t-download",
                     "interval_seconds": 2.0,
                     "resource_sequence": 10,
@@ -87,7 +87,7 @@ def test_get_background_tasks_config_reloads_when_file_mtime_changes(tmp_path: P
                     "enabled": True,
                     "stop_after_success": True,
                 },
-                "ipinfo_gz_downloader": {
+                "ipinfo_gz_extractor": {
                     "task_id": "t-download-2",
                     "interval_seconds": 2.5,
                     "resource_sequence": 10,
@@ -136,7 +136,7 @@ def test_get_background_tasks_config_raises_on_invalid_payload(tmp_path: Path) -
                     "resource_sequence": 5,
                     "enabled": True,
                 },
-                "ipinfo_gz_downloader": {
+                "ipinfo_gz_extractor": {
                     "task_id": "dup",
                     "interval_seconds": 2.0,
                     "resource_sequence": 10,

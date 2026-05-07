@@ -10,8 +10,8 @@
         "stop_after_success": true,
         "enabled": true
       },
-      "ipinfo_gz_downloader": {
-        "task_id": "ip_geolocation_ipinfo_gz_downloader",
+      "ipinfo_gz_extractor": {
+        "task_id": "ip_geolocation_ipinfo_gz_extractor",
         "interval_seconds": 5.0,
         "resource_sequence": 10,
         "enabled": true

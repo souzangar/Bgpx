@@ -1,4 +1,4 @@
-"""IP geolocation downloader with event-based, JSON-configured logging.
+"""IP geolocation extractor with event-based, JSON-configured logging.
 
 Logging model (human + AI agent guidance)
 -----------------------------------------
@@ -81,17 +81,17 @@ class IpGeolocationIpinfoGzExtractor:
 
     def run_once(self) -> None:
         """Run one poll cycle and sync working dataset when .gz source changes."""
-        event_logger.log("poll_started", "DEBUG", "IPinfo .gz downloader poll tick started (path=%s)", self._gz_source_path)
+        event_logger.log("poll_started", "DEBUG", "IPinfo .gz extractor poll tick started (path=%s)", self._gz_source_path)
         current = self._read_source_fingerprint()
         if current is None:
-            event_logger.log("source_missing", "DEBUG", "IPinfo .gz downloader poll tick skipped; source missing")
+            event_logger.log("source_missing", "DEBUG", "IPinfo .gz extractor poll tick skipped; source missing")
             return
 
         if self._last_fingerprint is not None and current == self._last_fingerprint:
             event_logger.log(
                 "poll_unchanged",
                 "DEBUG",
-                "IPinfo .gz downloader poll tick unchanged (inode=%s, mtime_ns=%s)",
+                "IPinfo .gz extractor poll tick unchanged (inode=%s, mtime_ns=%s)",
                 current.inode,
                 current.mtime_ns,
             )
@@ -104,7 +104,7 @@ class IpGeolocationIpinfoGzExtractor:
                 event_logger.log(
                     "debounce_skipped",
                     "DEBUG",
-                    "IPinfo .gz downloader poll tick skipped after debounce confirmation",
+                    "IPinfo .gz extractor poll tick skipped after debounce confirmation",
                 )
                 return
             current = confirmed
@@ -112,7 +112,7 @@ class IpGeolocationIpinfoGzExtractor:
         event_logger.log(
             "source_change_detected",
             "INFO",
-            "IPinfo .gz downloader source change detected (path=%s, inode=%s, mtime_ns=%s)",
+            "IPinfo .gz extractor source change detected (path=%s, inode=%s, mtime_ns=%s)",
             self._gz_source_path,
             current.inode,
             current.mtime_ns,
@@ -132,7 +132,7 @@ class IpGeolocationIpinfoGzExtractor:
                 event_logger.log(
                     "replace_working_dataset",
                     "INFO",
-                    "IPinfo .gz downloader replacing working dataset (working=%s)",
+                    "IPinfo .gz extractor replacing working dataset (working=%s)",
                     self._working_dataset_path,
                 )
                 self._replace_working_dataset_from_temp()
@@ -140,7 +140,7 @@ class IpGeolocationIpinfoGzExtractor:
                 event_logger.log(
                     "keep_working_dataset",
                     "DEBUG",
-                    "IPinfo .gz downloader extracted content unchanged; keeping working dataset",
+                    "IPinfo .gz extractor extracted content unchanged; keeping working dataset",
                 )
 
             self._last_fingerprint = next_fingerprint
@@ -152,7 +152,7 @@ class IpGeolocationIpinfoGzExtractor:
             self.sync_failure_count += 1
             event_logger.exception(
                 "sync_failed",
-                "IPinfo .gz downloader sync failed (failure_count=%s): %s",
+                "IPinfo .gz extractor sync failed (failure_count=%s): %s",
                 self.sync_failure_count,
                 self.last_sync_error,
             )

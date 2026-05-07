@@ -49,8 +49,8 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             response = client.get("/api/health")
             assert response.status_code == 200
 
-            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
-            assert gz_watch_status.task_id == "ip_geolocation_ipinfo_gz_downloader"
+            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
+            assert gz_watch_status.task_id == "ip_geolocation_ipinfo_gz_extractor"
             assert gz_watch_status.is_running is True
 
             status = runner.get_background_task_status("ip_geolocation_data_refresh")
@@ -61,7 +61,7 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             response = client.get("/api/health")
             assert response.status_code == 200
 
-            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
             assert gz_watch_status.is_running is True
 
             status = runner.get_background_task_status("ip_geolocation_data_refresh")
@@ -72,7 +72,7 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             assert response.status_code == 200
 
         with pytest.raises(KeyError):
-            runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
 
         with pytest.raises(KeyError):
             runner.get_background_task_status("ip_geolocation_data_refresh")
@@ -102,7 +102,7 @@ def test_app_lifespan_bootstrap_stops_after_first_success() -> None:
             assert bootstrap_status.is_running is False
             assert bootstrap_status.total_runs >= 1
 
-            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
             assert gz_watch_status.is_running is True
 
             refresh_status = runner.get_background_task_status("ip_geolocation_data_refresh")
