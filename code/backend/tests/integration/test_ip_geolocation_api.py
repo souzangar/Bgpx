@@ -120,6 +120,43 @@ def test_get_ipinfo_lookup_supports_country_type_as_country_code() -> None:
         reset_background_task_runner_for_tests()
 
 
+def test_get_ipinfo_lookup_supports_continent_type_as_continent_code() -> None:
+    """GET /api/ipinfo should accept continent type and treat value as continent code."""
+    reset_background_task_runner_for_tests()
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.request(
+                "GET",
+                "/api/ipinfo",
+                json={"type": "continent", "value": "EU"},
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] in {"success", "failure"}
+        assert payload["service_state"] in {"loading", "ready", "failed"}
+
+        if payload["status"] == "success":
+            assert payload["resolution_state"] in {"found", "initializing_db", "not_found"}
+            assert payload["data"]["continent"] == "EU"
+            assert isinstance(payload["data"]["items"], list)
+            assert isinstance(payload["data"]["total"], int)
+            if payload["data"]["items"]:
+                first = payload["data"]["items"][0]
+                assert set(first.keys()) == {
+                    "network",
+                    "country",
+                    "country_code",
+                    "asn",
+                }
+        else:
+            assert payload["service_state"] == "failed"
+    finally:
+        reset_background_task_runner_for_tests()
+
+
 def test_get_geo_status_returns_contract_payload() -> None:
     """GET /api/ipinfo_status should be reachable and return status contract fields."""
     reset_background_task_runner_for_tests()

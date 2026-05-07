@@ -13,6 +13,9 @@ ResolutionState = Literal["found", "initializing_db", "not_found"]
 IpGeolocationLookupTargetType = Literal["ip", "asn", "country", "continent"]
 
 
+TOTAL_CANNOT_BE_NEGATIVE_ERROR = "total cannot be negative"
+
+
 @dataclass(frozen=True)
 class IpGeolocationLookupRequestModel:
     """Lookup request payload with extensible target discriminator and value."""
@@ -102,7 +105,7 @@ class IpGeolocationAsnLookupDataModel:
             raise ValueError("asn must be a non-empty string")
 
         if self.total < 0:
-            raise ValueError("total cannot be negative")
+            raise ValueError(TOTAL_CANNOT_BE_NEGATIVE_ERROR)
 
 
 @dataclass(frozen=True)
@@ -129,7 +132,34 @@ class IpGeolocationCountryLookupDataModel:
             raise ValueError("country must be a non-empty string")
 
         if self.total < 0:
-            raise ValueError("total cannot be negative")
+            raise ValueError(TOTAL_CANNOT_BE_NEGATIVE_ERROR)
+
+
+@dataclass(frozen=True)
+class IpGeolocationContinentSubnetItemModel:
+    """Continent-code lookup item containing subnet and compact geo/asn fields."""
+
+    network: str
+    country: str
+    country_code: str
+    asn: str | None
+
+
+@dataclass(frozen=True)
+class IpGeolocationContinentLookupDataModel:
+    """Continent-code lookup payload containing all matched subnet records."""
+
+    continent: str
+    total: int
+    items: tuple[IpGeolocationContinentSubnetItemModel, ...]
+
+    def __post_init__(self) -> None:
+        """Validate continent lookup payload constraints."""
+        if not self.continent.strip():
+            raise ValueError("continent must be a non-empty string")
+
+        if self.total < 0:
+            raise ValueError(TOTAL_CANNOT_BE_NEGATIVE_ERROR)
 
 
 @dataclass(frozen=True)
@@ -143,7 +173,7 @@ class IpGeolocationLoadCountersModel:
     def __post_init__(self) -> None:
         """Validate non-negative counter constraints."""
         if self.total < 0:
-            raise ValueError("total cannot be negative")
+            raise ValueError(TOTAL_CANNOT_BE_NEGATIVE_ERROR)
 
         if self.loaded < 0:
             raise ValueError("loaded cannot be negative")
@@ -225,7 +255,12 @@ class IpGeolocationLookupSuccessResponseModel:
     status: Literal["success"]
     service_state: ServiceState
     resolution_state: ResolutionState
-    data: IpGeolocationLookupDataModel | IpGeolocationAsnLookupDataModel | IpGeolocationCountryLookupDataModel
+    data: (
+        IpGeolocationLookupDataModel
+        | IpGeolocationAsnLookupDataModel
+        | IpGeolocationCountryLookupDataModel
+        | IpGeolocationContinentLookupDataModel
+    )
 
 
 @dataclass(frozen=True)
@@ -251,6 +286,8 @@ __all__ = [
     "IpGeolocationAsnSubnetItemModel",
     "IpGeolocationCountryLookupDataModel",
     "IpGeolocationCountrySubnetItemModel",
+    "IpGeolocationContinentLookupDataModel",
+    "IpGeolocationContinentSubnetItemModel",
     "IpGeolocationLookupDataModel",
     "IpGeolocationLookupFailureResponseModel",
     "IpGeolocationLookupRequestModel",

@@ -321,6 +321,9 @@ Important constraint:
 - Never return lookup-failure-style values inside `resolution_state` (e.g. `failed`, `error`, `timeout`).
 - Those belong to envelope-level failure handling (`status = failure`).
 
+Implementation note:
+- In `ip_geolocation_service.py`, repeated failure-envelope message literals are centralized as a module-level constant (`_IP_GEO_SERVICE_FAILED_MESSAGE`) to keep message text consistent and satisfy static-analysis duplication rules.
+
 ### 6.3 Relation to HTTP response status
 
 `status` in payload and HTTP status code should be aligned but still represent different layers:
@@ -498,6 +501,19 @@ Planned methods:
     - `network`
     - `continent`
     - `continent_code`
+    - `asn`
+  - on `status = success`, return `resolution_state` as `found`, `initializing_db`, or `not_found`
+  - on service failures, return standard `status = failure` envelope
+
+- `lookup_continent_geolocation(continent: str) -> GeoLookupResultModel`
+  - support continent lookup by **continent code** (for example: `EU`, `NA`, `OC`)
+  - type discriminator is `continent`, but lookup must query from `continent_code`
+  - response `data` field order must be: `continent`, `total`, `items`
+  - return **all** matching subnet rows for queried continent code
+  - each continent item contains only:
+    - `network`
+    - `country`
+    - `country_code`
     - `asn`
   - on `status = success`, return `resolution_state` as `found`, `initializing_db`, or `not_found`
   - on service failures, return standard `status = failure` envelope

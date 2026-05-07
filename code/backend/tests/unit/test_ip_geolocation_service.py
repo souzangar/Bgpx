@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
 from infra.ip_geolocation import IpGeolocationReadResult
 from models.ip_geolocation import (
     IpGeolocationAsnLookupDataModel,
+    IpGeolocationContinentLookupDataModel,
     IpGeolocationCountryLookupDataModel,
     IpGeolocationLookupDataModel,
     IpGeolocationLookupFailureResponseModel,
@@ -327,6 +328,95 @@ def test_lookup_country_unresolved_after_ready_returns_not_found() -> None:
     assert payload.resolution_state == "not_found"
     assert isinstance(payload.data, IpGeolocationCountryLookupDataModel)
     assert payload.data.country == "DE"
+    assert payload.data.total == 0
+    assert payload.data.items == ()
+
+
+def test_lookup_continent_found_after_publish_returns_found_with_compact_payload() -> None:
+    """Matched continent-code lookup should return all matched subnet records."""
+    service = IpGeolocationService()
+    service.publish_snapshot(
+        IpGeolocationReadResult(
+            records=[
+                IpGeolocationRecordModel(
+                    network="8.8.8.0/24",
+                    country="United States",
+                    country_code="US",
+                    continent="North America",
+                    continent_code="NA",
+                    asn="AS15169",
+                    as_name="Google LLC",
+                    as_domain="google.com",
+                ),
+                IpGeolocationRecordModel(
+                    network="1.1.1.0/24",
+                    country="Australia",
+                    country_code="AU",
+                    continent="Oceania",
+                    continent_code="OC",
+                    asn="AS13335",
+                    as_name="Cloudflare",
+                    as_domain="cloudflare.com",
+                ),
+                IpGeolocationRecordModel(
+                    network="9.9.9.0/24",
+                    country="Germany",
+                    country_code="DE",
+                    continent="Europe",
+                    continent_code="EU",
+                    asn="AS19281",
+                    as_name="Quad9",
+                    as_domain="quad9.net",
+                ),
+            ],
+            total_lines=3,
+            malformed_lines=0,
+        ),
+        {},
+    )
+
+    payload = service.lookup_continent_geolocation("na")
+
+    assert payload.status == "success"
+    assert payload.service_state == "ready"
+    assert payload.resolution_state == "found"
+    assert isinstance(payload.data, IpGeolocationContinentLookupDataModel)
+    assert payload.data.continent == "NA"
+    assert payload.data.total == 1
+    assert len(payload.data.items) == 1
+    assert payload.data.items[0].network == "8.8.8.0/24"
+    assert payload.data.items[0].country == "United States"
+    assert payload.data.items[0].country_code == "US"
+    assert payload.data.items[0].asn == "AS15169"
+
+
+def test_lookup_continent_unresolved_while_loading_returns_initializing_db() -> None:
+    """Unresolved continent-code lookup during loading should map to initializing_db."""
+    service = IpGeolocationService()
+
+    payload = service.lookup_continent_geolocation("EU")
+
+    assert payload.status == "success"
+    assert payload.service_state == "loading"
+    assert payload.resolution_state == "initializing_db"
+    assert isinstance(payload.data, IpGeolocationContinentLookupDataModel)
+    assert payload.data.continent == "EU"
+    assert payload.data.total == 0
+    assert payload.data.items == ()
+
+
+def test_lookup_continent_unresolved_after_ready_returns_not_found() -> None:
+    """Unresolved continent-code lookup after readiness should map to not_found."""
+    service = IpGeolocationService()
+    service.publish_snapshot(_sample_read_result(), {})
+
+    payload = service.lookup_continent_geolocation("EU")
+
+    assert payload.status == "success"
+    assert payload.service_state == "ready"
+    assert payload.resolution_state == "not_found"
+    assert isinstance(payload.data, IpGeolocationContinentLookupDataModel)
+    assert payload.data.continent == "EU"
     assert payload.data.total == 0
     assert payload.data.items == ()
 

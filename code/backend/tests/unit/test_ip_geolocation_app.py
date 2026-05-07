@@ -16,6 +16,7 @@ if str(BACKEND_DIR) not in sys.path:
 from apps.ip_geolocation import (  # noqa: E402
     get_ip_geolocation_load_status,
     lookup_asn_geolocation,
+    lookup_continent_geolocation,
     lookup_country_geolocation,
     lookup_ip_geolocation,
     lookup_ip_geolocation_by_request,
@@ -23,6 +24,8 @@ from apps.ip_geolocation import (  # noqa: E402
 from models.ip_geolocation import (  # noqa: E402
     IpGeolocationAsnLookupDataModel,
     IpGeolocationAsnSubnetItemModel,
+    IpGeolocationContinentLookupDataModel,
+    IpGeolocationContinentSubnetItemModel,
     IpGeolocationCountryLookupDataModel,
     IpGeolocationCountrySubnetItemModel,
     IpGeolocationLookupDataModel,
@@ -259,12 +262,81 @@ def test_lookup_ip_geolocation_by_request_dispatches_country_type(monkeypatch) -
     assert payload is expected
 
 
+def test_lookup_continent_geolocation_calls_service_and_returns_payload(monkeypatch) -> None:
+    """App continent lookup should delegate to service and return response unchanged."""
+    expected = IpGeolocationLookupSuccessResponseModel(
+        status="success",
+        service_state="ready",
+        resolution_state="found",
+        data=IpGeolocationContinentLookupDataModel(
+            continent="EU",
+            items=(
+                IpGeolocationContinentSubnetItemModel(
+                    network="9.9.9.0/24",
+                    country="Germany",
+                    country_code="DE",
+                    asn="AS19281",
+                ),
+            ),
+            total=1,
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_lookup(self, continent: str):
+        captured["continent"] = continent
+        return expected
+
+    monkeypatch.setattr(
+        "services.ip_geolocation.ip_geolocation_service.IpGeolocationService.lookup_continent_geolocation",
+        _fake_lookup,
+    )
+
+    payload = lookup_continent_geolocation("EU")
+
+    assert payload is expected
+    assert captured == {"continent": "EU"}
+
+
+def test_lookup_ip_geolocation_by_request_dispatches_continent_type(monkeypatch) -> None:
+    """Request-based lookup should route continent type to continent lookup handler."""
+    expected = IpGeolocationLookupSuccessResponseModel(
+        status="success",
+        service_state="ready",
+        resolution_state="found",
+        data=IpGeolocationContinentLookupDataModel(
+            continent="NA",
+            items=(
+                IpGeolocationContinentSubnetItemModel(
+                    network="8.8.8.0/24",
+                    country="United States",
+                    country_code="US",
+                    asn="AS15169",
+                ),
+            ),
+            total=1,
+        ),
+    )
+
+    def _fake_lookup(continent: str):
+        assert continent == "na"
+        return expected
+
+    monkeypatch.setattr("apps.ip_geolocation.ip_geolocation_app.lookup_continent_geolocation", _fake_lookup)
+
+    payload = lookup_ip_geolocation_by_request(
+        IpGeolocationLookupRequestModel(type="continent", value="na")
+    )
+
+    assert payload is expected
+
+
 def test_lookup_ip_geolocation_by_request_rejects_other_unsupported_type() -> None:
     """Request-based lookup should raise client error for unsupported types."""
     with pytest.raises(HTTPException) as exc_info:
         lookup_ip_geolocation_by_request(
-            IpGeolocationLookupRequestModel(type="continent", value="EU")
+            IpGeolocationLookupRequestModel(type="invalid", value="EU")  # type: ignore[arg-type]
         )
 
     assert exc_info.value.status_code == 400
-    assert "Unsupported lookup type 'continent'" in str(exc_info.value)
+    assert "Unsupported lookup type" in str(exc_info.value)
