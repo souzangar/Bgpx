@@ -44,6 +44,10 @@
       "level": "WARNING",
       "propagate": true
     },
+    "bgpx.tasks.ip_geo.ipinfo_gz_downloader": {
+      "level": "WARNING",
+      "propagate": true
+    },
     "bgpx.runner.background_task_runner": {
       "level": "WARNING",
       "propagate": true
@@ -135,6 +139,25 @@
           "level": "DEBUG"
         },
         "sync_failed": {
+          "enabled": true,
+          "level": "ERROR"
+        }
+      }
+    },
+    "ip_geo_ipinfo_gz_downloader": {
+      "base_logger": "bgpx.tasks.ip_geo.ipinfo_gz_downloader",
+      "enabled": true,
+      "default_level": "INFO",
+      "events": {
+        "download_started": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "download_succeeded": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "download_failed": {
           "enabled": true,
           "level": "ERROR"
         }

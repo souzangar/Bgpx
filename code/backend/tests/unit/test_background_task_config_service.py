@@ -26,6 +26,7 @@ def test_get_background_tasks_config_returns_valid_ip_geo_defaults() -> None:
 
         task_by_key = {task.task_key: task for task in config.ip_geolocation.tasks}
         assert task_by_key["bootstrap_once"].task_id == "ip_geolocation_bootstrap_once"
+        assert task_by_key["ipinfo_gz_downloader"].task_id == "ip_geolocation_ipinfo_gz_downloader"
         assert task_by_key["ipinfo_gz_extractor"].task_id == "ip_geolocation_ipinfo_gz_extractor"
         assert task_by_key["data_refresh"].task_id == "ip_geolocation_data_refresh"
     finally:
@@ -66,6 +67,12 @@ def test_get_background_tasks_config_reloads_when_file_mtime_changes(tmp_path: P
                     "resource_sequence": 10,
                     "enabled": True,
                 },
+                "ipinfo_gz_downloader": {
+                    "task_id": "t-downloader",
+                    "interval_seconds": 86400.0,
+                    "resource_sequence": 8,
+                    "enabled": True,
+                },
                 "data_refresh": {
                     "task_id": "t-refresh",
                     "interval_seconds": 3.0,
@@ -91,6 +98,12 @@ def test_get_background_tasks_config_reloads_when_file_mtime_changes(tmp_path: P
                     "task_id": "t-download-2",
                     "interval_seconds": 2.5,
                     "resource_sequence": 10,
+                    "enabled": True,
+                },
+                "ipinfo_gz_downloader": {
+                    "task_id": "t-downloader-2",
+                    "interval_seconds": 86400.0,
+                    "resource_sequence": 8,
                     "enabled": True,
                 },
                 "data_refresh": {
@@ -140,6 +153,12 @@ def test_get_background_tasks_config_raises_on_invalid_payload(tmp_path: Path) -
                     "task_id": "dup",
                     "interval_seconds": 2.0,
                     "resource_sequence": 10,
+                    "enabled": True,
+                },
+                "ipinfo_gz_downloader": {
+                    "task_id": "downloader",
+                    "interval_seconds": 86400.0,
+                    "resource_sequence": 8,
                     "enabled": True,
                 },
                 "data_refresh": {

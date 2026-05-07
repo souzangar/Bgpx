@@ -141,6 +141,12 @@ For logging-related models:
 - Implementation lives in `code/backend/models/logging/logging_models.py`
 - Canonical documentation lives in this file (`code/backend/models/models.md`)
 
+Current parsing behavior notes (`parse_logging_components_config`):
+- Uses helper-based parsing to keep control flow simple and maintainable.
+- Ignores invalid component keys/values (non-string names, blank names, non-object configs).
+- Ignores invalid event keys/values with the same permissive filtering strategy.
+- Preserves strict model validation via `LoggingComponentConfigModel` and `LoggingEventConfigModel`.
+
 To avoid developer confusion, do **not** maintain a separate layer markdown file at
 `code/backend/models/logging/logging.md`.
 

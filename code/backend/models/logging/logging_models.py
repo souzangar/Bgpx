@@ -48,39 +48,75 @@ def parse_logging_components_config(raw_components: Any) -> dict[str, LoggingCom
 
     parsed: dict[str, LoggingComponentConfigModel] = {}
     for component_name, component_value in raw_components.items():
-        if not isinstance(component_name, str) or not component_name.strip():
+        normalized_component_name = _as_non_empty_str(component_name)
+        if normalized_component_name is None:
             continue
-        if not isinstance(component_value, dict):
+
+        parsed_component = _parse_logging_component_config(component_value)
+        if parsed_component is None:
             continue
 
-        raw_events = component_value.get("events")
-        parsed_events: dict[str, LoggingEventConfigModel] = {}
-        if isinstance(raw_events, dict):
-            for event_id, event_value in raw_events.items():
-                if not isinstance(event_id, str) or not event_id.strip():
-                    continue
-                if not isinstance(event_value, dict):
-                    continue
-
-                parsed_events[event_id] = LoggingEventConfigModel(
-                    enabled=bool(event_value.get("enabled", True)),
-                    level=event_value.get("level") if isinstance(event_value.get("level"), str) else None,
-                )
-
-        parsed[component_name] = LoggingComponentConfigModel(
-            enabled=bool(component_value.get("enabled", True)),
-            default_level=(
-                component_value.get("default_level")
-                if isinstance(component_value.get("default_level"), str)
-                else None
-            ),
-            base_logger=(
-                component_value.get("base_logger") if isinstance(component_value.get("base_logger"), str) else None
-            ),
-            events=parsed_events,
-        )
+        parsed[normalized_component_name] = parsed_component
 
     return parsed
+
+
+def _as_non_empty_str(raw_value: Any) -> str | None:
+    """Return a string only when the raw value is a non-empty string."""
+    if not isinstance(raw_value, str):
+        return None
+    if not raw_value.strip():
+        return None
+    return raw_value
+
+
+def _as_optional_str(raw_value: Any) -> str | None:
+    """Return a string only when raw value is a string; otherwise None."""
+    return raw_value if isinstance(raw_value, str) else None
+
+
+def _parse_logging_event_config(raw_event_value: Any) -> LoggingEventConfigModel | None:
+    """Parse and validate a raw event config object."""
+    if not isinstance(raw_event_value, dict):
+        return None
+
+    return LoggingEventConfigModel(
+        enabled=bool(raw_event_value.get("enabled", True)),
+        level=_as_optional_str(raw_event_value.get("level")),
+    )
+
+
+def _parse_logging_events(raw_events: Any) -> dict[str, LoggingEventConfigModel]:
+    """Parse event map into validated event config models."""
+    if not isinstance(raw_events, dict):
+        return {}
+
+    parsed_events: dict[str, LoggingEventConfigModel] = {}
+    for raw_event_id, raw_event_value in raw_events.items():
+        event_id = _as_non_empty_str(raw_event_id)
+        if event_id is None:
+            continue
+
+        parsed_event = _parse_logging_event_config(raw_event_value)
+        if parsed_event is None:
+            continue
+
+        parsed_events[event_id] = parsed_event
+
+    return parsed_events
+
+
+def _parse_logging_component_config(raw_component_value: Any) -> LoggingComponentConfigModel | None:
+    """Parse and validate a raw component config object."""
+    if not isinstance(raw_component_value, dict):
+        return None
+
+    return LoggingComponentConfigModel(
+        enabled=bool(raw_component_value.get("enabled", True)),
+        default_level=_as_optional_str(raw_component_value.get("default_level")),
+        base_logger=_as_optional_str(raw_component_value.get("base_logger")),
+        events=_parse_logging_events(raw_component_value.get("events")),
+    )
 
 
 __all__ = [

@@ -8,6 +8,7 @@ Location target:
 - Planned modular service packages:
   - `code/backend/services/ip_geolocation/ip_geolocation_service.py`
   - `code/backend/services/ip_geolocation/ip_geolocation_data_refresher.py`
+  - `code/backend/services/ip_geolocation/ip_geolocation_ipinfo_gz_downloader.py`
   - `code/backend/services/background_task_runner/background_task_runner.py`
 
 Related service docs:
@@ -60,6 +61,7 @@ code/backend/models/
 
 Boundary rule:
 - Keep `background_task_runner` generic (looping, cancellation, scheduling interval, error boundaries).
+- Keep `ip_geolocation_ipinfo_gz_downloader` domain-specific for provider download concerns.
 - Keep `ip_geolocation_data_refresher` domain-specific (fingerprint check, reload decision, snapshot swap, geo-specific status).
 - Do **not** place domain refreshers under `background_task_runner/tasks/...`.
 

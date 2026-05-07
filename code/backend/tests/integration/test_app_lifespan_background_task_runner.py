@@ -49,6 +49,10 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             response = client.get("/api/health")
             assert response.status_code == 200
 
+            downloader_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            assert downloader_status.task_id == "ip_geolocation_ipinfo_gz_downloader"
+            assert downloader_status.is_running is True
+
             gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
             assert gz_watch_status.task_id == "ip_geolocation_ipinfo_gz_extractor"
             assert gz_watch_status.is_running is True
@@ -61,6 +65,9 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             response = client.get("/api/health")
             assert response.status_code == 200
 
+            downloader_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            assert downloader_status.is_running is True
+
             gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
             assert gz_watch_status.is_running is True
 
@@ -70,6 +77,9 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
         with TestClient(app) as client:
             response = client.get("/api/health")
             assert response.status_code == 200
+
+        with pytest.raises(KeyError):
+            runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
 
         with pytest.raises(KeyError):
             runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
@@ -101,6 +111,9 @@ def test_app_lifespan_bootstrap_stops_after_first_success() -> None:
             assert bootstrap_status.task_id == "ip_geolocation_bootstrap_once"
             assert bootstrap_status.is_running is False
             assert bootstrap_status.total_runs >= 1
+
+            downloader_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_downloader")
+            assert downloader_status.is_running is True
 
             gz_watch_status = runner.get_background_task_status("ip_geolocation_ipinfo_gz_extractor")
             assert gz_watch_status.is_running is True
