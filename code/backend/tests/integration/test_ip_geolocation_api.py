@@ -1,6 +1,7 @@
 """Integration tests for IP geolocation API route wiring and payload contracts."""
 
 from pathlib import Path
+import json
 import sys
 
 from dataclasses import dataclass
@@ -14,6 +15,13 @@ if str(BACKEND_DIR) not in sys.path:
 
 from main import create_app
 from services.background_task_runner import reset_background_task_runner_for_tests
+from services.admin_token_auth import reset_admin_token_auth_config_cache_for_tests
+
+
+def _write_admin_token_config(tmp_path: Path, payload: dict[str, object]) -> Path:
+    path = tmp_path / "admin_token_auth_config.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def test_get_ipinfo_lookup_returns_contract_payload() -> None:
@@ -181,9 +189,18 @@ def test_get_geo_status_returns_contract_payload() -> None:
         reset_background_task_runner_for_tests()
 
 
-def test_post_ipinfo_update_force_triggers_manual_downloader_cycle(monkeypatch) -> None:
+def test_post_ipinfo_update_force_triggers_manual_downloader_cycle(monkeypatch, tmp_path: Path) -> None:
     """POST /api/ipinfo_update should be reachable and return force-update payload."""
     reset_background_task_runner_for_tests()
+    config_path = _write_admin_token_config(
+        tmp_path,
+        {"version": 1, "tokens": [{"token": "token_admin", "note": "test-admin"}]},
+    )
+    monkeypatch.setattr(
+        "services.admin_token_auth.admin_token_auth_service.ADMIN_TOKEN_AUTH_CONFIG_PATH",
+        config_path,
+    )
+    reset_admin_token_auth_config_cache_for_tests()
 
     @dataclass(frozen=True)
     class _StubForceUpdateResponse:
@@ -213,7 +230,10 @@ def test_post_ipinfo_update_force_triggers_manual_downloader_cycle(monkeypatch) 
     try:
         app = create_app()
         with TestClient(app) as client:
-            response = client.post("/api/ipinfo_update")
+            response = client.post(
+                "/api/ipinfo_update",
+                headers={"X-Admin-Token": "token_admin"},
+            )
 
         assert response.status_code == 200
         payload = response.json()
@@ -227,4 +247,30 @@ def test_post_ipinfo_update_force_triggers_manual_downloader_cycle(monkeypatch) 
         assert "last_succeeded_at" in payload
         assert "last_error" in payload
     finally:
+        reset_admin_token_auth_config_cache_for_tests()
+        reset_background_task_runner_for_tests()
+
+
+def test_post_ipinfo_update_rejects_missing_admin_token(monkeypatch, tmp_path: Path) -> None:
+    """POST /api/ipinfo_update should reject requests without admin token header."""
+    reset_background_task_runner_for_tests()
+    config_path = _write_admin_token_config(
+        tmp_path,
+        {"version": 1, "tokens": [{"token": "token_admin", "note": "test-admin"}]},
+    )
+    monkeypatch.setattr(
+        "services.admin_token_auth.admin_token_auth_service.ADMIN_TOKEN_AUTH_CONFIG_PATH",
+        config_path,
+    )
+    reset_admin_token_auth_config_cache_for_tests()
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.post("/api/ipinfo_update")
+
+        assert response.status_code == 401
+        assert response.json().get("detail") == "Missing X-Admin-Token header"
+    finally:
+        reset_admin_token_auth_config_cache_for_tests()
         reset_background_task_runner_for_tests()

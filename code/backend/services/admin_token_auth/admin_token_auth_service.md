@@ -82,48 +82,43 @@ code/backend/models/
 ## 5) Token Strategy (v1.1 - simple multi-token)
 
 ### 5.1 Token source
-- Primary environment variable: `BGPX_ADMIN_TOKENS`
+- Primary JSON config file: `code/backend/data/configs/admin_token_auth_config.json`
 
-`BGPX_ADMIN_TOKENS` supports multiple entries with optional note (e.g., person name):
+Supported config structure:
 
-```text
-<token>|<note>
+```json
+{
+  "version": 1,
+  "tokens": [
+    { "token": "token_1", "note": "person 1" },
+    { "token": "token_2", "note": "person 2" }
+  ]
+}
 ```
 
-Example values:
+Parsing/validation rules:
+1. root must be a JSON object,
+2. `version` is required and must be a positive integer,
+3. `tokens` is required and must be an array,
+4. each token entry must be a JSON object with non-empty `token`,
+5. `note` is optional, and when present must be a non-empty string,
+6. duplicate tokens are de-duplicated by first-seen token,
+7. invalid/missing config causes protected routes to fail closed.
 
-```text
-token_1|person 1;token_2|person 2
-```
+### 5.5 Config file sample
 
-or newline-separated:
+Recommended starter config:
 
-```text
-token_1|person 1
-token_2|person 2
-```
-
-Parsing rules (keep simple):
-1. token is required; note is optional,
-2. separators accepted: `;` and newline,
-3. blank/invalid entries are ignored,
-4. duplicate tokens are de-duplicated.
-
-### 5.5 `.env` sample
-
-Recommended `.env` setting:
-
-```env
-# Admin tokens (single privilege level, no RBAC)
-# Format: <token>|<note> ; <token>|<note>
-BGPX_ADMIN_TOKENS=token_1|person 1;token_2|person 2
-```
-
-Docs readability equivalent (newline style):
-
-```text
-token_1|person 1
-token_2|person 2
+```json
+{
+  "version": 1,
+  "tokens": [
+    {
+      "token": "replace_with_admin_token_1",
+      "note": "admin-1"
+    }
+  ]
+}
 ```
 
 ### 5.2 Transport
@@ -168,7 +163,7 @@ Rule:
 
 Planned responsibilities:
 
-1. Load configured admin token entries from env (`BGPX_ADMIN_TOKENS`).
+1. Load configured admin token entries from JSON config file (`admin_token_auth_config.json`).
 2. Validate incoming token.
 3. Return model-based validation result (optional matched note metadata).
 4. Provide FastAPI-friendly guard/dependency wrapper.
@@ -189,12 +184,13 @@ Behavior:
 
 ### 8.1 Admin API endpoints (runtime-side)
 
-Suggested endpoints:
-- `GET /api/admin/ip-geolocation/status`
-- `POST /api/admin/ip-geolocation/reinitialize`
-- `POST /api/admin/ip-geolocation/refresh-once`
+Current protected endpoint:
+- `POST /api/ipinfo_update`
 
-All protected by `admin_token_auth` guard.
+Protection contract:
+- `X-Admin-Token` header is required,
+- token is validated by `services/admin_token_auth.require_admin_token`,
+- missing/invalid token returns `401 Unauthorized`.
 
 ### 8.3 Reuse for future domains
 
@@ -206,7 +202,7 @@ Any future private API (ping/traceroute/maintenance/etc.) reuses the same guard.
 
 1. Prefer binding backend admin exposure to trusted network interfaces.
 2. Use TLS in non-local deployments.
-3. Rotate tokens in `BGPX_ADMIN_TOKENS` via deployment/env management.
+3. Rotate tokens in `code/backend/data/configs/admin_token_auth_config.json` via deployment/config management.
 4. Keep all tokens at one privilege level in v1.1 (no RBAC/scope checks).
 
 ---
@@ -274,7 +270,7 @@ Constraints:
 - Enforce architecture flow: `api -> apps -> services -> infra/models`.
 - Keep DTOs in `models/admin_token_auth` only.
 - Do not log or expose raw token values.
-- Fail closed when `BGPX_ADMIN_TOKENS` is missing/empty for protected routes.
+- Fail closed when `admin_token_auth_config.json` is missing/invalid/empty for protected routes.
 - Keep v1.1 scope to single privilege level (no role/scope matrix).
 
 ---
@@ -308,14 +304,14 @@ Scope:
 - Implement the core token parsing and validation engine in `code/backend/services/admin_token_auth/admin_token_auth_service.py`.
 
 Responsibilities:
-1. Read raw configuration from `BGPX_ADMIN_TOKENS`.
-2. Parse entries using supported separators (`;` and newline).
-3. Parse `token|note` pairs where token is required and note is optional.
-4. Ignore blank or malformed entries safely.
-5. De-duplicate tokens while preserving deterministic behavior.
-6. Validate provided request token against configured token set.
-7. Perform constant-time token comparison in match loop.
-8. Return model-based validation result with deterministic reason.
+1. Read raw configuration from `code/backend/data/configs/admin_token_auth_config.json`.
+2. Validate JSON shape (`version`, `tokens[]`, token entry schema).
+3. Parse `token` + optional `note` entries.
+4. De-duplicate tokens while preserving deterministic first-seen behavior.
+5. Validate provided request token against configured token set.
+6. Perform constant-time token comparison in match loop.
+7. Return model-based validation result with deterministic reason.
+8. Use mtime-based in-memory cache + reset hook for tests.
 
 Failure/decision contract:
 - Missing config -> `missing_config`
@@ -354,20 +350,18 @@ Acceptance checks:
 ### 12.5 Stage 4 — Protected Admin Endpoint Integration
 
 Scope:
-- Apply guard to runtime admin IP-geolocation operations.
+- Apply guard to existing runtime IP-geolocation force-update operation.
 
-Target endpoints:
-- `GET /api/admin/ip-geolocation/status`
-- `POST /api/admin/ip-geolocation/reinitialize`
-- `POST /api/admin/ip-geolocation/refresh-once`
+Target endpoint:
+- `POST /api/ipinfo_update`
 
 Responsibilities:
-1. Ensure each endpoint requires admin token guard.
+1. Ensure target endpoint requires admin token guard.
 2. Keep endpoint business logic in app/service layers.
 3. Keep auth as cross-cutting concern through shared guard only.
 
 Acceptance checks:
-- All listed endpoints enforce admin token validation.
+- `POST /api/ipinfo_update` enforces admin token validation.
 - Endpoint domain responses are unchanged except for access control behavior.
 
 ---
@@ -394,7 +388,7 @@ Scope:
 - Add focused unit tests for parsing and validation behavior.
 
 Required unit coverage:
-1. Empty/missing `BGPX_ADMIN_TOKENS` -> `missing_config`.
+1. Missing/invalid token config file -> `missing_config`.
 2. Missing request token -> `missing_token`.
 3. Invalid request token -> `invalid_token`.
 4. Valid token match -> `ok`.
@@ -421,8 +415,8 @@ Required integration coverage:
 1. Protected endpoint call without header -> `401`.
 2. Protected endpoint with invalid token -> `401`.
 3. Protected endpoint with any configured valid token -> success path.
-4. Multi-token config behavior allows all configured valid tokens.
-5. Missing/empty token config enforces fail-closed behavior for protected routes.
+4. Multi-token JSON config behavior allows all configured valid tokens.
+5. Missing/invalid/empty token JSON config enforces fail-closed behavior for protected routes.
 
 Acceptance checks:
 - HTTP behavior exactly matches auth contract.

@@ -204,3 +204,4 @@ Status route remains:
 Manual force-update route:
 - `POST /api/ipinfo_update`
 - Triggers one immediate `IpGeolocationIpinfoGzDownloader.run_once()` cycle via app layer orchestration.
+- Protected by admin token guard via `X-Admin-Token` header.

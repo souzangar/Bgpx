@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hmac
-import os
+import json
+from pathlib import Path
+from typing import Any
 
 from fastapi import Header, HTTPException, status
 
@@ -16,36 +18,92 @@ from models.admin_token_auth import (
 
 AdminTokenEntry = tuple[str, str | None]
 
+ADMIN_TOKEN_AUTH_CONFIG_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "configs" / "admin_token_auth_config.json"
+)
 
-def get_configured_admin_tokens() -> tuple[AdminTokenEntry, ...]:
-    """Return normalized, de-duplicated admin token entries from environment config."""
-    raw_config = os.getenv("BGPX_ADMIN_TOKENS", "")
-    if not raw_config.strip():
-        return ()
+_CACHED_TOKENS: tuple[AdminTokenEntry, ...] | None = None
+_CONFIG_MTIME_NS: int | None = None
 
-    entries: list[AdminTokenEntry] = []
+
+def _read_config_mtime_ns() -> int | None:
+    try:
+        return ADMIN_TOKEN_AUTH_CONFIG_PATH.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def _load_raw_config() -> dict[str, Any]:
+    try:
+        with ADMIN_TOKEN_AUTH_CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load admin token auth config from '{ADMIN_TOKEN_AUTH_CONFIG_PATH}': {exc}"
+        ) from exc
+
+    if not isinstance(loaded, dict):
+        raise RuntimeError(
+            f"Admin token auth config file '{ADMIN_TOKEN_AUTH_CONFIG_PATH}' must contain a JSON object"
+        )
+    return loaded
+
+
+def _parse_tokens(raw: dict[str, Any]) -> tuple[AdminTokenEntry, ...]:
+    version = raw.get("version")
+    if not isinstance(version, int) or version <= 0:
+        raise RuntimeError("admin_token_auth_config: 'version' must be a positive integer")
+
+    tokens_any = raw.get("tokens")
+    if not isinstance(tokens_any, list):
+        raise RuntimeError("admin_token_auth_config: 'tokens' must be an array")
+
+    parsed: list[AdminTokenEntry] = []
     seen_tokens: set[str] = set()
 
-    for raw_entry in raw_config.replace(";", "\n").splitlines():
-        candidate = raw_entry.strip()
-        if not candidate:
-            continue
+    for index, token_entry_any in enumerate(tokens_any):
+        if not isinstance(token_entry_any, dict):
+            raise RuntimeError(
+                f"admin_token_auth_config: token entry at index {index} must be an object"
+            )
 
-        if "|" in candidate:
-            token_part, note_part = candidate.split("|", 1)
-            token = token_part.strip()
-            note = note_part.strip() or None
-        else:
-            token = candidate
-            note = None
+        token_any = token_entry_any.get("token")
+        if not isinstance(token_any, str) or not token_any.strip():
+            raise RuntimeError(
+                f"admin_token_auth_config: token entry at index {index} must have a non-empty 'token'"
+            )
+        token = token_any.strip()
 
-        if not token or token in seen_tokens:
+        note_any = token_entry_any.get("note")
+        note: str | None = None
+        if note_any is not None:
+            if not isinstance(note_any, str) or not note_any.strip():
+                raise RuntimeError(
+                    f"admin_token_auth_config: token entry at index {index} has invalid 'note'"
+                )
+            note = note_any.strip()
+
+        if token in seen_tokens:
             continue
 
         seen_tokens.add(token)
-        entries.append((token, note))
+        parsed.append((token, note))
 
-    return tuple(entries)
+    return tuple(parsed)
+
+
+def get_configured_admin_tokens() -> tuple[AdminTokenEntry, ...]:
+    """Return validated, de-duplicated admin token entries from JSON config file."""
+    global _CACHED_TOKENS, _CONFIG_MTIME_NS
+
+    current_mtime_ns = _read_config_mtime_ns()
+    if _CACHED_TOKENS is not None and _CONFIG_MTIME_NS == current_mtime_ns:
+        return _CACHED_TOKENS
+
+    parsed = _parse_tokens(_load_raw_config())
+    _CACHED_TOKENS = parsed
+    _CONFIG_MTIME_NS = current_mtime_ns
+    return parsed
 
 
 def get_admin_token_auth_config_state() -> AdminTokenAuthConfigStateModel:
@@ -59,7 +117,11 @@ def get_admin_token_auth_config_state() -> AdminTokenAuthConfigStateModel:
 
 def validate_admin_token(provided_token: str | None) -> AdminTokenValidationResultModel:
     """Validate provided token against configured admin token inventory."""
-    configured_tokens = get_configured_admin_tokens()
+    try:
+        configured_tokens = get_configured_admin_tokens()
+    except RuntimeError:
+        configured_tokens = ()
+
     if not configured_tokens:
         return AdminTokenValidationResultModel(
             is_authorized=False,
@@ -108,10 +170,18 @@ def _build_auth_failure_detail(reason: AdminTokenValidationReason) -> str:
     return "Invalid admin token"
 
 
+def reset_admin_token_auth_config_cache_for_tests() -> None:
+    """Reset cached admin token auth config state for test isolation."""
+    global _CACHED_TOKENS, _CONFIG_MTIME_NS
+    _CACHED_TOKENS = None
+    _CONFIG_MTIME_NS = None
+
+
 __all__ = [
     "AdminTokenEntry",
     "get_admin_token_auth_config_state",
     "get_configured_admin_tokens",
     "require_admin_token",
+    "reset_admin_token_auth_config_cache_for_tests",
     "validate_admin_token",
 ]
