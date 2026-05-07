@@ -55,7 +55,7 @@ def _apply_verbose_levels(logging_config: dict[str, Any]) -> None:
         "uvicorn.access",
         "bgpx",
         "bgpx.tasks.ip_geo.refresher",
-        "bgpx.tasks.ip_geo.downloader",
+        "bgpx.tasks.ip_geo.ipinfo_gz_extractor",
         "bgpx.runner.background_task_runner",
     ):
         _apply_named_logger_level(loggers, logger_name, verbose_level)

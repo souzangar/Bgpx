@@ -5,13 +5,13 @@ Logging model (human + AI agent guidance)
 - This module emits logs through `event_logger` (see `get_component_event_logger`).
 - Runtime logging behavior is configured in:
   `code/backend/data/configs/logging_config.json`
-- Component key for this file: `ip_geo_downloader`
+- Component key for this file: `ip_geo_ipinfo_gz_extractor`
 
 Important rules when editing/adding logs
 ---------------------------------------
 1) Every `event_logger.log("<event_id>", ...)` / `event_logger.exception("<event_id>", ...)`
    should have a matching event entry in `logging_config.json` under:
-   `components.ip_geo_downloader.events`.
+   `components.ip_geo_ipinfo_gz_extractor.events`.
 2) If you add a new event ID in code, update JSON in the same change.
 3) Keep event IDs stable and descriptive (for example: `source_change_detected`, `sync_failed`).
 
@@ -40,7 +40,7 @@ from services.logging.logging_service import get_component_event_logger
 GZ_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json.gz")
 WORKING_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json")
 TEMP_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.tmp.json")
-event_logger = get_component_event_logger("ip_geo_downloader", "bgpx.tasks.ip_geo.downloader")
+event_logger = get_component_event_logger("ip_geo_ipinfo_gz_extractor", "bgpx.tasks.ip_geo.ipinfo_gz_extractor")
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class SourceFingerprint:
     mtime_ns: int
 
 
-class IpGeolocationDataDownloader:
+class IpGeolocationIpinfoGzExtractor:
     """Watch .gz source changes and conditionally replace working JSON dataset."""
 
     def __init__(
@@ -198,6 +198,6 @@ __all__ = [
     "GZ_DATASET_PATH",
     "TEMP_DATASET_PATH",
     "WORKING_DATASET_PATH",
-    "IpGeolocationDataDownloader",
+    "IpGeolocationIpinfoGzExtractor",
     "SourceFingerprint",
 ]

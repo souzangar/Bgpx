@@ -12,8 +12,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from services.ip_geolocation.ip_geolocation_data_downloader import (  # noqa: E402
-    IpGeolocationDataDownloader,
+from services.ip_geolocation.ip_geolocation_ipinfo_gz_extractor import (  # noqa: E402
+    IpGeolocationIpinfoGzExtractor,
 )
 
 
@@ -46,7 +46,7 @@ def test_downloader_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
     def _stat_func(_path: object) -> _FakeStat:
         return fingerprints.pop(0)
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -73,7 +73,7 @@ def test_downloader_replaces_working_file_when_content_differs(tmp_path: Path) -
     _write_gz(gz_path, '{"a":2}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -97,7 +97,7 @@ def test_downloader_keeps_working_file_when_content_is_same(tmp_path: Path) -> N
     _write_gz(gz_path, '{"a":1}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -115,7 +115,7 @@ def test_downloader_keeps_working_file_when_content_is_same(tmp_path: Path) -> N
 def test_downloader_handles_missing_gz_as_noop(tmp_path: Path) -> None:
     """Missing .gz source should return silently without failed sync accounting."""
     gz_path = tmp_path / "missing.json.gz"
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=tmp_path / "ipinfo_lite.json",
         temp_dataset_path=tmp_path / "ipinfo_lite.tmp.json",
@@ -136,7 +136,7 @@ def test_downloader_cleans_static_temp_file_on_failure(tmp_path: Path) -> None:
     temp_path = tmp_path / "ipinfo_lite.tmp.json"
     _write_gz(gz_path, '{"a":1}\n')
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -163,7 +163,7 @@ def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> Non
     _write_gz(gz_path, '{"a":2}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -171,7 +171,7 @@ def test_downloader_info_logs_show_refresh_events(caplog, tmp_path: Path) -> Non
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.INFO, logger="bgpx.tasks.ip_geo.downloader"):
+    with caplog.at_level(logging.INFO, logger="bgpx.tasks.ip_geo.ipinfo_gz_extractor"):
         downloader.run_once()
 
     messages = [record.getMessage() for record in caplog.records]
@@ -188,7 +188,7 @@ def test_downloader_warning_level_suppresses_info_and_debug_logs(caplog, tmp_pat
     _write_gz(gz_path, '{"a":2}\n')
     working_path.write_text('{"a":1}\n', encoding="utf-8")
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=working_path,
         temp_dataset_path=temp_path,
@@ -196,7 +196,7 @@ def test_downloader_warning_level_suppresses_info_and_debug_logs(caplog, tmp_pat
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.WARNING, logger="bgpx.tasks.ip_geo.downloader"):
+    with caplog.at_level(logging.WARNING, logger="bgpx.tasks.ip_geo.ipinfo_gz_extractor"):
         downloader.run_once()
 
     assert caplog.records == []
@@ -212,7 +212,7 @@ def test_downloader_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -
     def _stat_func(_path: object) -> _FakeStat:
         return fingerprints.pop(0)
 
-    downloader = IpGeolocationDataDownloader(
+    downloader = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
         working_dataset_path=tmp_path / "ipinfo_lite.json",
         temp_dataset_path=tmp_path / "ipinfo_lite.tmp.json",
@@ -220,7 +220,7 @@ def test_downloader_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) -
         sleep_func=lambda _seconds: None,
     )
 
-    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.downloader"):
+    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.ipinfo_gz_extractor"):
         downloader.run_once()
         downloader.run_once()
 

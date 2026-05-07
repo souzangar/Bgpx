@@ -85,7 +85,7 @@ When verbose is enabled, service sets `INFO` level for:
 - `uvicorn.access`
 - `bgpx`
 - `bgpx.tasks.ip_geo.refresher`
-- `bgpx.tasks.ip_geo.downloader`
+- `bgpx.tasks.ip_geo.ipinfo_gz_extractor`
 - `bgpx.runner.background_task_runner`
 
 ### 4.3 Event registry hot-reload

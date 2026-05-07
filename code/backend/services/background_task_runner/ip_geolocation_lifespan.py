@@ -15,7 +15,7 @@ from apps.ip_geolocation import get_ip_geolocation_service
 from models.background_task_runner import BackgroundTaskDefinition
 from services.background_task_runner.background_task_config_service import get_background_tasks_config
 from services.background_task_runner import get_background_task_runner
-from services.ip_geolocation.ip_geolocation_data_downloader import IpGeolocationDataDownloader
+from services.ip_geolocation.ip_geolocation_ipinfo_gz_extractor import IpGeolocationIpinfoGzExtractor
 from services.ip_geolocation.ip_geolocation_data_refresher import IpGeolocationDataRefresher
 
 
@@ -60,7 +60,7 @@ async def app_lifespan(_app: FastAPI):
 
     ip_geolocation_service = get_ip_geolocation_service()
     ip_geolocation_service.initialize_ip_geolocation_dataset()
-    ip_geolocation_downloader = IpGeolocationDataDownloader()
+    ip_geolocation_downloader = IpGeolocationIpinfoGzExtractor()
     ip_geolocation_refresher = IpGeolocationDataRefresher(
         publish_snapshot=ip_geolocation_service.publish_snapshot,
         is_snapshot_equivalent=ip_geolocation_service.is_snapshot_equivalent,
