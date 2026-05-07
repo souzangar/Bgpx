@@ -1,0 +1,22 @@
+info:
+  name: Geo Lookup IP V4
+  type: http
+  seq: 6
+
+http:
+  method: GET
+  url: https://localhost/api/ipinfo
+  body:
+    type: json
+    data: |-
+      {
+        "type": "ip",
+        "value": "1.225.64.0"
+      }
+  auth: inherit
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

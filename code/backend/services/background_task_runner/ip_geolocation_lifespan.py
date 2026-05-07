@@ -24,6 +24,7 @@ IP_GEO_BOOTSTRAP_TASK_KEY = "bootstrap_once"
 IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_KEY = "ipinfo_gz_downloader"
 IP_GEO_IPINFO_GZ_EXTRACTOR_TASK_KEY = "ipinfo_gz_extractor"
 IP_GEO_REFRESH_TASK_KEY = "data_refresh"
+IP_GEO_DOWNLOADER_RESOURCE_KEY_SUFFIX = "downloader"
 
 
 def _register_background_task_idempotent(task: BackgroundTaskDefinition) -> None:
@@ -92,6 +93,7 @@ async def app_lifespan(_app: FastAPI):
     }
 
     configured_tasks_by_key = {task.task_key: task for task in configured_ip_geo.tasks}
+    base_resource_key = configured_ip_geo.resource_key
     enabled_tasks: list[BackgroundTaskDefinition] = []
 
     for required_task_key in (
@@ -115,12 +117,20 @@ async def app_lifespan(_app: FastAPI):
                 f"background_tasks_config: no runnable is mapped for task '{required_task_key}'"
             )
 
+        task_resource_key = base_resource_key
+        if required_task_key == IP_GEO_IPINFO_GZ_DOWNLOADER_TASK_KEY:
+            # Isolate downloader cadence from extractor/refresh sequencing so
+            # 24h polling does not gate 5s operational tasks.
+            task_resource_key = (
+                f"{base_resource_key}:{IP_GEO_DOWNLOADER_RESOURCE_KEY_SUFFIX}"
+            )
+
         enabled_tasks.append(
             BackgroundTaskDefinition(
                 task_id=configured_task.task_id,
                 interval_seconds=configured_task.interval_seconds,
                 run_once=run_once,
-                resource_key=configured_ip_geo.resource_key,
+                resource_key=task_resource_key,
                 resource_sequence=configured_task.resource_sequence,
                 stop_after_success=configured_task.stop_after_success,
             )

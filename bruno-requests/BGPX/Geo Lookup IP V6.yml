@@ -1,18 +1,18 @@
 info:
-  name: Geo Lookup IP
+  name: Geo Lookup IP V6
   type: http
   seq: 5
 
 http:
   method: GET
-  url: https://localhost/api/geo/lookup?ip=1.1.1.1
-  params:
-    - name: ip
-      value: 1.1.1.1
-      type: query
+  url: https://localhost/api/ipinfo
   body:
     type: json
-    data: ""
+    data: |-
+      {
+        "type": "ip",
+        "value": "2a11:29c0:3d88:3849::1"
+      }
   auth: inherit
 
 settings:

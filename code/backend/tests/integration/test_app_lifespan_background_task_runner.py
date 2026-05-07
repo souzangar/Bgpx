@@ -61,6 +61,20 @@ def test_app_lifespan_registers_and_cleans_ip_geo_refresh_task() -> None:
             assert status.task_id == "ip_geolocation_data_refresh"
             assert status.is_running is True
 
+            downloader_resource_key = runner._registry[
+                "ip_geolocation_ipinfo_gz_downloader"
+            ].task_definition.resource_key
+            extractor_resource_key = runner._registry[
+                "ip_geolocation_ipinfo_gz_extractor"
+            ].task_definition.resource_key
+            refresh_resource_key = runner._registry[
+                "ip_geolocation_data_refresh"
+            ].task_definition.resource_key
+
+            assert downloader_resource_key.endswith(":downloader")
+            assert extractor_resource_key == refresh_resource_key
+            assert downloader_resource_key != extractor_resource_key
+
         with TestClient(app) as client:
             response = client.get("/api/health")
             assert response.status_code == 200

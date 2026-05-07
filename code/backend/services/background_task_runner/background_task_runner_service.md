@@ -167,6 +167,13 @@ Current config supports:
 6. register enabled tasks idempotently,
 7. start enabled tasks.
 
+Resource-key mapping detail for IP geolocation tasks:
+- base resource key comes from config (`ip_geolocation.resource_key`),
+- `ipinfo_gz_extractor` and `data_refresh` remain in the base resource group,
+- `ipinfo_gz_downloader` is intentionally isolated to
+  `"<base_resource_key>:downloader"` so its long polling interval does not gate
+  extractor/refresh short-cadence scheduling.
+
 Shutdown flow:
 1. stop enabled tasks idempotently,
 2. unregister enabled tasks idempotently,

@@ -13,19 +13,19 @@
       "ipinfo_gz_downloader": {
         "task_id": "ip_geolocation_ipinfo_gz_downloader",
         "interval_seconds": 86400.0,
-        "resource_sequence": 8,
+        "resource_sequence": 25,
         "enabled": true
       },
       "ipinfo_gz_extractor": {
         "task_id": "ip_geolocation_ipinfo_gz_extractor",
         "interval_seconds": 5.0,
-        "resource_sequence": 10,
+        "resource_sequence": 50,
         "enabled": true
       },
       "data_refresh": {
         "task_id": "ip_geolocation_data_refresh",
         "interval_seconds": 5.0,
-        "resource_sequence": 20,
+        "resource_sequence": 100,
         "enabled": true
       }
     }
