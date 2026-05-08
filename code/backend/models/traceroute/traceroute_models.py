@@ -19,7 +19,10 @@ class TracerouteHopModel:
     packets_sent: int
     packets_received: int
     packet_loss: float
+    country: str | None = None
     country_code: str | None = None
+    asn: str | None = None
+    as_name: str | None = None
 
 
 @dataclass(frozen=True)

@@ -16,7 +16,7 @@ from models.traceroute import TracerouteHopModel, TracerouteResultModel
 
 
 def test_run_traceroute_calls_adapter_with_expected_args(monkeypatch) -> None:
-    """App should orchestrate adapter call and enrich hop rows with country code."""
+    """App should orchestrate adapter call and enrich hop rows with country details."""
 
     expected = TracerouteResultModel(
         result="success",
@@ -61,8 +61,11 @@ def test_run_traceroute_calls_adapter_with_expected_args(monkeypatch) -> None:
     class _FakeIpGeoService:
         def lookup_ip_geolocation(self, ip: str):
             if ip == "8.8.8.8":
-                return SimpleNamespace(status="success", data=SimpleNamespace(country_code="US"))
-            return SimpleNamespace(status="success", data=SimpleNamespace(country_code=None))
+                return SimpleNamespace(
+                    status="success",
+                    data=SimpleNamespace(country="United States", country_code="US", asn="AS15169", as_name="Google LLC"),
+                )
+            return SimpleNamespace(status="success", data=SimpleNamespace(country=None, country_code=None, asn=None, as_name=None))
 
     monkeypatch.setattr(
         "apps.traceroute.traceroute_app.get_ip_geolocation_service",
@@ -75,5 +78,11 @@ def test_run_traceroute_calls_adapter_with_expected_args(monkeypatch) -> None:
     assert captured == {
         "host": "example.com",
     }
+    assert result.hops[0].country == "United States"
     assert result.hops[0].country_code == "US"
+    assert result.hops[0].asn == "AS15169"
+    assert result.hops[0].as_name == "Google LLC"
+    assert result.hops[1].country is None
     assert result.hops[1].country_code is None
+    assert result.hops[1].asn is None
+    assert result.hops[1].as_name is None

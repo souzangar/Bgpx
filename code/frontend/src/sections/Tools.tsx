@@ -116,9 +116,10 @@ function TracerouteTable({ hops }: Readonly<{ hops: TracerouteHopResponse[] }>) 
           <tr>
             <th className="px-3 py-2">Hop</th>
             <th className="px-3 py-2">Address</th>
-            <th className="px-3 py-2">Country</th>
             <th className="px-3 py-2">Average RTT</th>
             <th className="px-3 py-2">Loss</th>
+            <th className="px-3 py-2">Country</th>
+            <th className="px-3 py-2">ASN</th>
           </tr>
         </thead>
         <tbody>
@@ -126,9 +127,10 @@ function TracerouteTable({ hops }: Readonly<{ hops: TracerouteHopResponse[] }>) 
             <tr key={`${hop.distance}-${hop.address}`} className="border-t border-slate-800/70">
               <td className="px-3 py-2 font-mono text-slate-300">{hop.distance}</td>
               <td className="px-3 py-2 font-mono text-cyan-200">{hop.address}</td>
-              <td className="px-3 py-2 font-mono">{formatCountryCell(hop.country_code)}</td>
               <td className="px-3 py-2">{formatMs(hop.avg_rtt_ms)}</td>
               <td className="px-3 py-2">{formatPercent(hop.packet_loss * 100)}</td>
+              <td className="px-3 py-2">{formatTracerouteCountryCell(hop.country, hop.country_code)}</td>
+              <td className="px-3 py-2">{formatTracerouteAsnCell(hop.asn, hop.as_name)}</td>
             </tr>
           ))}
         </tbody>
@@ -152,7 +154,44 @@ function formatCountryCell(countryCode: string | null): string {
   return `${flag} ${normalized}`
 }
 
+function formatTracerouteCountryCell(country: string | null, countryCode: string | null): string {
+  const countryName = (country ?? '').trim()
+  const formattedCountryCode = formatCountryCell(countryCode)
+
+  if (countryName && formattedCountryCode !== 'N/A') {
+    return `${countryName} (${formattedCountryCode})`
+  }
+
+  if (countryName) {
+    return countryName
+  }
+
+  if (formattedCountryCode !== 'N/A') {
+    return formattedCountryCode
+  }
+
+  return 'N/A'
+}
+
+function formatTracerouteAsnCell(asn: string | null, asName: string | null): string {
+  const asnValue = (asn ?? '').trim()
+  const asNameValue = (asName ?? '').trim()
+
+  if (asnValue && asNameValue) {
+    return `${asnValue} - ${asNameValue}`
+  }
+
+  if (asnValue) {
+    return asnValue
+  }
+
+  return 'N/A'
+}
+
 function IpLookupSummary({ data }: Readonly<{ data: IpLookupData }>) {
+  const countryValue = data.country ?? 'N/A'
+  const formattedCountryCode = formatCountryCell(data.country_code)
+
   return (
     <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
@@ -165,15 +204,17 @@ function IpLookupSummary({ data }: Readonly<{ data: IpLookupData }>) {
       </div>
       <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
         <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Country</dt>
-        <dd className="mt-1 text-sm text-slate-100">{data.country ?? 'N/A'}</dd>
-      </div>
-      <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
-        <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Country Code</dt>
-        <dd className="mt-1 text-sm text-slate-100">{formatCountryCell(data.country_code)}</dd>
+        <dd className="mt-1 text-sm text-slate-100">
+          {countryValue} ({formattedCountryCode})
+        </dd>
       </div>
       <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
         <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">ASN</dt>
         <dd className="mt-1 font-mono text-sm text-slate-100">{data.asn ?? 'N/A'}</dd>
+      </div>
+      <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
+        <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">ASN Name</dt>
+        <dd className="mt-1 text-sm text-slate-100">{data.as_name ?? 'N/A'}</dd>
       </div>
       <div className="rounded-lg border border-slate-800 bg-slate-900/70 p-3">
         <dt className="text-xs uppercase tracking-[0.16em] text-slate-500">Domain</dt>
@@ -186,10 +227,32 @@ function IpLookupSummary({ data }: Readonly<{ data: IpLookupData }>) {
 function AsnLookupTable({ data }: Readonly<{ data: AsnLookupData }>) {
   const [page, setPage] = useState(1)
   const [goToPageInput, setGoToPageInput] = useState('1')
-  const totalPages = Math.max(1, Math.ceil(data.items.length / LOOKUP_PAGE_SIZE))
+  const [filterQuery, setFilterQuery] = useState('')
+  const normalizedFilterQuery = filterQuery.trim().toLowerCase()
+  const filteredItems = useMemo(() => {
+    if (!normalizedFilterQuery) {
+      return data.items
+    }
+
+    return data.items.filter((item) => {
+      const searchableText = [
+        item.network,
+        item.country,
+        item.country_code,
+        item.continent,
+        item.continent_code,
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return searchableText.includes(normalizedFilterQuery)
+    })
+  }, [data.items, normalizedFilterQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / LOOKUP_PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
   const start = (currentPage - 1) * LOOKUP_PAGE_SIZE
-  const pageItems = data.items.slice(start, start + LOOKUP_PAGE_SIZE)
+  const pageItems = filteredItems.slice(start, start + LOOKUP_PAGE_SIZE)
 
   const goToPage = () => {
     const numeric = Number.parseInt(goToPageInput, 10)
@@ -204,10 +267,24 @@ function AsnLookupTable({ data }: Readonly<{ data: AsnLookupData }>) {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-300">
-        <span className="font-mono text-slate-100">{data.asn}</span>
-        {data.as_name ? <span> - {data.as_name}</span> : null} · {data.total} network(s)
-      </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-slate-300">
+          <span className="font-mono text-slate-100">{data.asn}</span>
+          {data.as_name ? <span> - {data.as_name}</span> : null} · {data.total} network(s)
+        </p>
+        <input
+          type="text"
+          value={filterQuery}
+          onChange={(event) => {
+            setFilterQuery(event.target.value)
+            setPage(1)
+            setGoToPageInput('1')
+          }}
+          placeholder="Filter network, country, continent..."
+          className="w-full rounded-md border border-slate-700/80 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 sm:w-72"
+          aria-label="Filter ASN lookup table"
+        />
+      </div>
       <div className="overflow-x-auto rounded-xl border border-slate-800">
         <table className="min-w-full border-collapse text-sm text-slate-200">
           <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.16em] text-slate-400">
@@ -228,6 +305,10 @@ function AsnLookupTable({ data }: Readonly<{ data: AsnLookupData }>) {
           </tbody>
         </table>
       </div>
+
+      {filteredItems.length === 0 ? (
+        <p className="text-center text-xs text-slate-400">No rows match your filter.</p>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-center gap-3">
         <button
@@ -279,10 +360,32 @@ function AsnLookupTable({ data }: Readonly<{ data: AsnLookupData }>) {
 function CountryLookupTable({ data }: Readonly<{ data: CountryLookupData }>) {
   const [page, setPage] = useState(1)
   const [goToPageInput, setGoToPageInput] = useState('1')
-  const totalPages = Math.max(1, Math.ceil(data.items.length / LOOKUP_PAGE_SIZE))
+  const [filterQuery, setFilterQuery] = useState('')
+  const normalizedFilterQuery = filterQuery.trim().toLowerCase()
+  const filteredItems = useMemo(() => {
+    if (!normalizedFilterQuery) {
+      return data.items
+    }
+
+    return data.items.filter((item) => {
+      const searchableText = [
+        item.network,
+        item.continent,
+        item.continent_code,
+        item.asn ?? '',
+        item.as_name ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+
+      return searchableText.includes(normalizedFilterQuery)
+    })
+  }, [data.items, normalizedFilterQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / LOOKUP_PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
   const start = (currentPage - 1) * LOOKUP_PAGE_SIZE
-  const pageItems = data.items.slice(start, start + LOOKUP_PAGE_SIZE)
+  const pageItems = filteredItems.slice(start, start + LOOKUP_PAGE_SIZE)
 
   const goToPage = () => {
     const numeric = Number.parseInt(goToPageInput, 10)
@@ -297,9 +400,23 @@ function CountryLookupTable({ data }: Readonly<{ data: CountryLookupData }>) {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-300">
-        <span className="font-mono text-slate-100">{data.country}</span> · {data.total} network(s)
-      </p>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-slate-300">
+          <span className="font-mono text-slate-100">{data.country}</span> · {data.total} network(s)
+        </p>
+        <input
+          type="text"
+          value={filterQuery}
+          onChange={(event) => {
+            setFilterQuery(event.target.value)
+            setPage(1)
+            setGoToPageInput('1')
+          }}
+          placeholder="Filter network, continent, ASN..."
+          className="w-full rounded-md border border-slate-700/80 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 sm:w-72"
+          aria-label="Filter country lookup table"
+        />
+      </div>
       <div className="overflow-x-auto rounded-xl border border-slate-800">
         <table className="min-w-full border-collapse text-sm text-slate-200">
           <thead className="bg-slate-900/80 text-left text-xs uppercase tracking-[0.16em] text-slate-400">
@@ -329,6 +446,10 @@ function CountryLookupTable({ data }: Readonly<{ data: CountryLookupData }>) {
           </tbody>
         </table>
       </div>
+
+      {filteredItems.length === 0 ? (
+        <p className="text-center text-xs text-slate-400">No rows match your filter.</p>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-center gap-3">
         <button
@@ -393,7 +514,7 @@ export function Tools({
   const [activeIpTab, setActiveIpTab] = useState<IpToolTab>('ip-lookup')
   const [ipLookupValue, setIpLookupValue] = useState('1.1.1.1')
   const [asnLookupValue, setAsnLookupValue] = useState('AS13335')
-  const [countryLookupValue, setCountryLookupValue] = useState('US')
+  const [countryLookupValue, setCountryLookupValue] = useState('IR')
   const [ipLookupValidationError, setIpLookupValidationError] = useState<string | null>(null)
   const [asnLookupValidationError, setAsnLookupValidationError] = useState<string | null>(null)
   const [countryLookupValidationError, setCountryLookupValidationError] = useState<string | null>(null)
@@ -614,7 +735,7 @@ export function Tools({
                 event.preventDefault()
                 void runLookup('country', countryLookupValue, setCountryLookupValidationError, setCountryLookupState)
               }}>
-                <TextInput id="country-lookup-value" label="Country code" value={countryLookupValue} placeholder="US" onChange={setCountryLookupValue} />
+                <TextInput id="country-lookup-value" label="Country code" value={countryLookupValue} placeholder="IR" onChange={setCountryLookupValue} />
                 {countryLookupValidationError ? <div className="rounded-xl border border-amber-400/30 bg-amber-950/30 p-4 text-sm text-amber-100">{countryLookupValidationError}</div> : null}
                 <div className="flex justify-end">
                   <Button type="submit" disabled={countryLookupState.loading}>{countryLookupState.loading ? 'Looking up country...' : 'Run country lookup'}</Button>

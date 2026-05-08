@@ -10,9 +10,12 @@ Defines shared traceroute DTOs used across infra/app/api layers.
 
 - distance/address
 - RTT and packet-loss metrics
+- `country: str | None`
 - `country_code: str | None`
+- `asn: str | None`
+- `as_name: str | None`
 
-`country_code` is nullable to support hops that cannot be geolocated (timeouts, private/unlisted ranges, or unresolved addresses).
+`country`, `country_code`, `asn`, and `as_name` are nullable to support hops that cannot be geolocated (timeouts, private/unlisted ranges, or unresolved addresses).
 
 ## Result contract
 

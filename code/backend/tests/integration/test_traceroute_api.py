@@ -46,7 +46,10 @@ def test_get_traceroute_returns_valid_payload_for_reachable_target() -> None:
         assert len(payload["hops"]) > 0
         first_hop = payload["hops"][0]
         assert isinstance(first_hop, dict)
+        assert "country" in first_hop
         assert "country_code" in first_hop
+        assert "asn" in first_hop
+        assert "as_name" in first_hop
     else:
         message = payload["message"].strip().lower()
         assert message != ""

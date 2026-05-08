@@ -22,7 +22,10 @@ export interface TracerouteHopResponse {
   packets_sent: number
   packets_received: number
   packet_loss: number
+  country: string | null
   country_code: string | null
+  asn: string | null
+  as_name: string | null
 }
 
 export interface TracerouteResponse {

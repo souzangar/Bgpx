@@ -54,6 +54,10 @@ Existing request/validation behavior is preserved:
 IP Tools are wired to lookup behavior:
 
 - **IP Lookup** renders resolved IP/network/country/ASN/domain details.
+  - Country presentation is a single field combining country name with formatted country code (`flag + ISO-2`) in parentheses.
+    - Example: `Australia (🇦🇺 AU)`
+  - The previous standalone country-code card is removed.
+  - The freed card slot is now used for **ASN Name** (`as_name`) with `N/A` fallback when absent.
 - **ASN Lookup** renders a network list table for the ASN.
 - **Country Lookup** renders a network list table for the country code.
 
@@ -61,6 +65,22 @@ ASN and Country lookup displays include provider naming when available:
 
 - ASN result summary renders `ASN - as_name` above the table (for example `AS13335 - Cloudflare, Inc.`).
 - Country table ASN cells render `ASN - as_name` when both are present, otherwise fallback to plain ASN or `N/A`.
+
+ASN lookup table also includes a right-aligned filter input on the same header row:
+
+- Filter matches across all row fields (case-insensitive):
+  - `network` (IP/CIDR)
+  - `country` and `country_code`
+  - `continent` and `continent_code`
+- Pagination is applied on filtered results.
+
+Country lookup table also includes a right-aligned filter input on the same header row:
+
+- Filter matches across all row fields (case-insensitive):
+  - `network` (IP/CIDR)
+  - `continent` and `continent_code`
+  - `asn` and `as_name`
+- Pagination is applied on filtered results.
 
 ASN and Country list tables support pagination:
 
@@ -74,9 +94,15 @@ ASN and Country list tables support pagination:
 
 Traceroute table contract now includes geolocation enrichment:
 
-- A new **Country** column is rendered in traceroute hop rows.
-- The displayed value comes from hop-level `country_code` returned by backend.
-- For valid ISO-2 codes, UI renders **flag + code** in the same cell (for example `🇩🇪 DE`).
-- If `country_code` is missing/empty/invalid (for example private IPs or unresolved interconnect hops), UI shows **`N/A`**.
+- An **ASN** column is rendered as the **rightmost** traceroute table column.
+- A **Country** column is rendered immediately before ASN.
+- ASN cell format is `asn - as_name` when both values are available.
+- If `as_name` is missing, ASN cell falls back to `asn`.
+- If ASN data is unavailable, ASN cell shows `N/A`.
+- The displayed value is composed from hop-level `country` and `country_code` returned by backend.
+- When both values are present and code is valid, UI renders **`Country (flag + code)`** (for example `Australia (🇦🇺 AU)`).
+- If only country name is available, UI renders the country name.
+- If only a valid country code is available, UI renders **flag + code** (for example `🇩🇪 DE`).
+- If both fields are missing/invalid (for example private IPs or unresolved interconnect hops), UI shows **`N/A`**.
 
 This keeps the column title user-friendly while preserving a compact country-code display format.
