@@ -1,4 +1,11 @@
-import type { ClientIpInfoResponse, HealthResponse, PingResponse, TracerouteResponse } from './types'
+import type {
+  ClientIpInfoResponse,
+  HealthResponse,
+  IpLookupRequestPayload,
+  IpLookupResponse,
+  PingResponse,
+  TracerouteResponse,
+} from './types'
 
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
@@ -44,4 +51,12 @@ export function fetchPing(host: string, signal?: AbortSignal): Promise<PingRespo
 
 export function fetchTraceroute(host: string, signal?: AbortSignal): Promise<TracerouteResponse> {
   return getJson<TracerouteResponse>(`/api/traceroute?host=${encodeURIComponent(host)}`, signal)
+}
+
+export async function fetchIpGeolocationLookup(
+  payload: IpLookupRequestPayload,
+  signal?: AbortSignal,
+): Promise<IpLookupResponse> {
+  const query = encodeURIComponent(JSON.stringify(payload))
+  return getJson<IpLookupResponse>(`/api/ipinfo?request=${query}`, signal)
 }

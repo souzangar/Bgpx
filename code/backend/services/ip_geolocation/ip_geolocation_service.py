@@ -421,15 +421,18 @@ class IpGeolocationService:
                 status="success",
                 service_state=service_state,
                 resolution_state="not_found" if service_state == "ready" else "initializing_db",
-                data=IpGeolocationAsnLookupDataModel(asn=asn, items=(), total=0),
+                data=IpGeolocationAsnLookupDataModel(asn=asn, items=(), total=0, as_name=None),
             )
 
         matched_items: list[IpGeolocationAsnSubnetItemModel] = []
+        matched_as_name: str | None = None
         for entry in snapshot:
             record = entry.record
             if record.asn is None:
                 continue
             if record.asn.strip().upper() == normalized_asn:
+                if matched_as_name is None and record.as_name is not None and record.as_name.strip():
+                    matched_as_name = record.as_name.strip()
                 matched_items.append(
                     IpGeolocationAsnSubnetItemModel(
                         network=record.network,
@@ -449,6 +452,7 @@ class IpGeolocationService:
                     asn=normalized_asn,
                     items=tuple(matched_items),
                     total=len(matched_items),
+                    as_name=matched_as_name,
                 ),
             )
 
@@ -456,7 +460,7 @@ class IpGeolocationService:
             status="success",
             service_state=service_state,
             resolution_state="not_found" if service_state == "ready" else "initializing_db",
-            data=IpGeolocationAsnLookupDataModel(asn=normalized_asn, items=(), total=0),
+            data=IpGeolocationAsnLookupDataModel(asn=normalized_asn, items=(), total=0, as_name=None),
         )
 
     def lookup_country_geolocation(self, country: str) -> IpGeolocationLookupResponseModel:
@@ -494,6 +498,7 @@ class IpGeolocationService:
                         continent=record.continent,
                         continent_code=record.continent_code,
                         asn=record.asn,
+                        as_name=record.as_name,
                     )
                 )
 

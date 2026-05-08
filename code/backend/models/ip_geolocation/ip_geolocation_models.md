@@ -29,3 +29,8 @@
 ## Notes
 - This layer exposes model symbols via `__all__` in `ip_geolocation_models.py`.
 - Changes in this file should remain synchronized with implementation updates in `ip_geolocation_models.py`.
+
+## Recent Contract Update
+- ASN lookup response model now includes optional `as_name` in `IpGeolocationAsnLookupDataModel`.
+- Country subnet item model now includes optional `as_name` in `IpGeolocationCountrySubnetItemModel`.
+- Both fields are optional and default to `None` to preserve backward-compatible model construction in existing tests/callers.

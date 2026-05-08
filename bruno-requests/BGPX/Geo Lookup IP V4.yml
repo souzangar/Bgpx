@@ -11,10 +11,7 @@ http:
     data: |-
       {
         "type": "ip",
-        "value": "9.9.9.9"
-        
-        
-        
+        "value": "104.28.149.59"  
       }
   auth: inherit
 

@@ -243,6 +243,7 @@ def test_lookup_asn_found_after_publish_returns_found_with_geo_payload() -> None
     assert payload.resolution_state == "found"
     assert isinstance(payload.data, IpGeolocationAsnLookupDataModel)
     assert payload.data.asn == "AS15169"
+    assert payload.data.as_name == "Provider"
     assert payload.data.total == 2
     assert len(payload.data.items) == 2
     assert payload.data.items[0].network == "8.8.8.0/24"
@@ -259,6 +260,7 @@ def test_lookup_asn_unresolved_while_loading_returns_initializing_db() -> None:
     assert payload.service_state == "loading"
     assert payload.resolution_state == "initializing_db"
     assert isinstance(payload.data, IpGeolocationAsnLookupDataModel)
+    assert payload.data.as_name is None
     assert payload.data.total == 0
     assert payload.data.items == ()
 
@@ -274,6 +276,7 @@ def test_lookup_asn_unresolved_after_ready_returns_not_found() -> None:
     assert payload.service_state == "ready"
     assert payload.resolution_state == "not_found"
     assert isinstance(payload.data, IpGeolocationAsnLookupDataModel)
+    assert payload.data.as_name is None
     assert payload.data.total == 0
     assert payload.data.items == ()
 

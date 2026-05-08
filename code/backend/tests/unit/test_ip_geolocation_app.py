@@ -131,6 +131,7 @@ def test_lookup_asn_geolocation_calls_service_and_returns_payload(monkeypatch) -
         resolution_state="found",
         data=IpGeolocationAsnLookupDataModel(
             asn="AS13335",
+            as_name="Cloudflare, Inc.",
             items=(
                 IpGeolocationAsnSubnetItemModel(
                     network="1.1.1.0/24",
@@ -168,6 +169,7 @@ def test_lookup_ip_geolocation_by_request_dispatches_asn_type(monkeypatch) -> No
         resolution_state="found",
         data=IpGeolocationAsnLookupDataModel(
             asn="AS15169",
+            as_name="Google LLC",
             items=(
                 IpGeolocationAsnSubnetItemModel(
                     network="8.8.8.0/24",
@@ -208,6 +210,7 @@ def test_lookup_country_geolocation_calls_service_and_returns_payload(monkeypatc
                     continent="North America",
                     continent_code="NA",
                     asn="AS15169",
+                    as_name="Google LLC",
                 ),
             ),
             total=1,
@@ -244,6 +247,7 @@ def test_lookup_ip_geolocation_by_request_dispatches_country_type(monkeypatch) -
                     continent="North America",
                     continent_code="NA",
                     asn="AS15169",
+                    as_name="Google LLC",
                 ),
             ),
             total=1,

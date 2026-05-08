@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 import ipaddress
+import json
+from typing import Any, cast
 
 from fastapi import HTTPException
 
@@ -134,6 +136,34 @@ def lookup_ip_geolocation_by_request(
             "Currently supported types: ['ip' (e.g., 8.8.8.8, 2a11:29c0:3d88:3849::1), 'asn' (e.g., AS13335), 'country' (e.g., IR), 'continent' (e.g., AS)]."
         ),
     )
+
+
+def build_lookup_request_model(
+    request_body: IpGeolocationLookupRequestModel | None,
+    request_query_json: str | None,
+) -> IpGeolocationLookupRequestModel:
+    """Build typed lookup request model from body or `request` query JSON payload."""
+    if request_body is not None:
+        return request_body
+
+    if request_query_json is None:
+        raise HTTPException(status_code=400, detail="Provide lookup request in body or ?request=<json>")
+
+    try:
+        parsed = json.loads(request_query_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid request query JSON payload") from exc
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="request query JSON payload must be an object")
+
+    payload = cast(dict[str, Any], parsed)
+    try:
+        return IpGeolocationLookupRequestModel(**payload)
+    except TypeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid request query fields") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def get_ip_geolocation_load_status() -> IpGeolocationLoadStatusModel:

@@ -49,6 +49,7 @@ def test_parse_traceroute_result_success_branch() -> None:
     assert result.hops[0].distance == 1
     assert result.hops[0].address == "192.168.1.1"
     assert result.hops[0].avg_rtt_ms == pytest.approx(1.3)
+    assert result.hops[0].country_code is None
 
 
 def test_parse_traceroute_result_timeout_branch() -> None:

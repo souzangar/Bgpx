@@ -24,6 +24,10 @@ The `ip_geolocation_service.py` module is responsible for:
 - Exposing lookup and status use-cases for upper layers
 - Handling progressive loading and readiness behavior
 
+### Contract note: ASN/Country lookup naming
+- ASN lookup response includes optional ASN provider name (`as_name`) when available in matched records.
+- Country lookup item rows include optional `as_name` alongside `asn` for downstream UI display needs.
+
 It must **not** directly perform low-level I/O. All source access goes through infra adapters.
 
 ---

@@ -22,6 +22,7 @@ export interface TracerouteHopResponse {
   packets_sent: number
   packets_received: number
   packet_loss: number
+  country_code: string | null
 }
 
 export interface TracerouteResponse {
@@ -40,6 +41,72 @@ export interface ClientIpInfoResponse {
   asn: string | null
   as_domain: string | null
 }
+
+export type IpLookupTargetType = 'ip' | 'asn' | 'country'
+
+export interface IpLookupRequestPayload {
+  type: IpLookupTargetType
+  value: string
+}
+
+export interface IpLookupData {
+  ip: string
+  network: string | null
+  country: string | null
+  country_code: string | null
+  continent: string | null
+  continent_code: string | null
+  asn: string | null
+  as_name: string | null
+  as_domain: string | null
+}
+
+export interface AsnLookupItem {
+  network: string
+  country: string
+  country_code: string
+  continent: string
+  continent_code: string
+}
+
+export interface AsnLookupData {
+  asn: string
+  as_name: string | null
+  total: number
+  items: AsnLookupItem[]
+}
+
+export interface CountryLookupItem {
+  network: string
+  continent: string
+  continent_code: string
+  asn: string | null
+  as_name: string | null
+}
+
+export interface CountryLookupData {
+  country: string
+  total: number
+  items: CountryLookupItem[]
+}
+
+export interface IpLookupSuccessResponse {
+  status: 'success'
+  service_state: 'loading' | 'ready' | 'failed'
+  resolution_state: 'found' | 'initializing_db' | 'not_found'
+  data: IpLookupData | AsnLookupData | CountryLookupData
+}
+
+export interface IpLookupFailureResponse {
+  status: 'failure'
+  service_state: 'failed'
+  error: {
+    code: string
+    message: string
+  }
+}
+
+export type IpLookupResponse = IpLookupSuccessResponse | IpLookupFailureResponse
 
 export interface RequestState<T> {
   loading: boolean

@@ -76,6 +76,7 @@ def test_get_ipinfo_lookup_supports_asn_type() -> None:
         if payload["status"] == "success":
             assert payload["resolution_state"] in {"found", "initializing_db", "not_found"}
             assert payload["data"]["asn"] == "AS13335"
+            assert "as_name" in payload["data"]
             assert isinstance(payload["data"]["items"], list)
             assert isinstance(payload["data"]["total"], int)
             if payload["data"]["items"]:
@@ -123,6 +124,7 @@ def test_get_ipinfo_lookup_supports_country_type_as_country_code() -> None:
                     "continent",
                     "continent_code",
                     "asn",
+                    "as_name",
                 }
         else:
             assert payload["service_state"] == "failed"

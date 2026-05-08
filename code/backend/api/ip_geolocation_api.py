@@ -6,10 +6,11 @@ from dataclasses import asdict, is_dataclass
 import json
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Body, Depends, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import PlainTextResponse, Response
 
 from apps.ip_geolocation import (
+    build_lookup_request_model,
     force_ipinfo_gz_update,
     get_ip_geolocation_load_status,
     lookup_client_asn_geolocation,
@@ -36,10 +37,12 @@ def _to_payload(model: object) -> dict[str, Any]:
 
 @router.get("/ipinfo", tags=["ip-geolocation"])
 def lookup_ip_geo(
-    request: Annotated[IpGeolocationLookupRequestModel, Body(...)],
+    request: Annotated[IpGeolocationLookupRequestModel | None, Body()] = None,
+    request_query: Annotated[str | None, Query(alias="request")] = None,
 ) -> dict[str, Any]:
-    """Lookup requested geolocation using typed request body (GET-with-body contract)."""
-    return _to_payload(lookup_ip_geolocation_by_request(request))
+    """Lookup requested geolocation using typed request payload from body or query."""
+    lookup_request = build_lookup_request_model(request, request_query)
+    return _to_payload(lookup_ip_geolocation_by_request(lookup_request))
 
 
 @router.get("/ipinfo_status", tags=["ip-geolocation"])

@@ -104,6 +104,7 @@ class IpGeolocationAsnLookupDataModel:
     asn: str
     total: int
     items: tuple[IpGeolocationAsnSubnetItemModel, ...]
+    as_name: str | None = None
 
     def __post_init__(self) -> None:
         """Validate ASN lookup payload constraints."""
@@ -122,6 +123,7 @@ class IpGeolocationCountrySubnetItemModel:
     continent: str
     continent_code: str
     asn: str | None
+    as_name: str | None = None
 
 
 @dataclass(frozen=True)
