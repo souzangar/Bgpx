@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from services.ip_geolocation.ip_geolocation_ipinfo_gz_extractor import (  # noqa: E402
+    _LOCALHOST_OVERRIDE_LINE,
     IpGeolocationIpinfoGzExtractor,
 )
 
@@ -31,6 +32,10 @@ def _write_gz(path: Path, content: str) -> None:
 
 def _raise_file_not_found(_path: object) -> _FakeStat:
     raise FileNotFoundError()
+
+
+def _dataset_with_override(line: str) -> str:
+    return f"{_LOCALHOST_OVERRIDE_LINE}\n{line}\n"
 
 
 def test_extractor_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
@@ -60,8 +65,8 @@ def test_extractor_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
     second_content = working_path.read_text(encoding="utf-8")
 
     assert extractor.sync_attempt_count == 1
-    assert first_content == '{"a":1}\n'
-    assert second_content == '{"a":1}\n'
+    assert first_content == _dataset_with_override('{"a":1}')
+    assert second_content == _dataset_with_override('{"a":1}')
     assert temp_path.exists() is False
 
 
@@ -83,7 +88,7 @@ def test_extractor_replaces_working_file_when_content_differs(tmp_path: Path) ->
 
     extractor.run_once()
 
-    assert working_path.read_text(encoding="utf-8") == '{"a":2}\n'
+    assert working_path.read_text(encoding="utf-8") == _dataset_with_override('{"a":2}')
     assert temp_path.exists() is False
     assert extractor.sync_attempt_count == 1
     assert extractor.sync_success_count == 1
@@ -95,7 +100,7 @@ def test_extractor_keeps_working_file_when_content_is_same(tmp_path: Path) -> No
     working_path = tmp_path / "ipinfo_lite.json"
     temp_path = tmp_path / "ipinfo_lite.tmp.json"
     _write_gz(gz_path, '{"a":1}\n')
-    working_path.write_text('{"a":1}\n', encoding="utf-8")
+    working_path.write_text(_dataset_with_override('{"a":1}'), encoding="utf-8")
 
     extractor = IpGeolocationIpinfoGzExtractor(
         gz_source_path=gz_path,
@@ -107,7 +112,7 @@ def test_extractor_keeps_working_file_when_content_is_same(tmp_path: Path) -> No
 
     extractor.run_once()
 
-    assert working_path.read_text(encoding="utf-8") == '{"a":1}\n'
+    assert working_path.read_text(encoding="utf-8") == _dataset_with_override('{"a":1}')
     assert temp_path.exists() is False
     assert extractor.sync_success_count == 1
 
@@ -227,3 +232,25 @@ def test_extractor_debug_logs_include_unchanged_cycle(caplog, tmp_path: Path) ->
     messages = [record.getMessage() for record in caplog.records]
     assert any("poll tick started" in message for message in messages)
     assert any("poll tick unchanged" in message for message in messages)
+
+
+def test_extractor_prepends_localhost_override_and_removes_duplicates(tmp_path: Path) -> None:
+    """Extractor should ensure exactly one localhost override at first line."""
+    gz_path = tmp_path / "ipinfo_lite.json.gz"
+    working_path = tmp_path / "ipinfo_lite.json"
+    temp_path = tmp_path / "ipinfo_lite.tmp.json"
+    _write_gz(gz_path, f'{{"a":2}}\n{_LOCALHOST_OVERRIDE_LINE}\n{{"b":3}}\n')
+
+    extractor = IpGeolocationIpinfoGzExtractor(
+        gz_source_path=gz_path,
+        working_dataset_path=working_path,
+        temp_dataset_path=temp_path,
+        stat_func=lambda _path: _FakeStat(10, 1000),
+        sleep_func=lambda _seconds: None,
+    )
+
+    extractor.run_once()
+
+    lines = working_path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == _LOCALHOST_OVERRIDE_LINE
+    assert lines.count(_LOCALHOST_OVERRIDE_LINE) == 1

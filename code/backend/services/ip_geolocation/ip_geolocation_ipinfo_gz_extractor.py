@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import filecmp
 import gzip
+import json
 import os
 from pathlib import Path
 import shutil
@@ -41,6 +42,18 @@ GZ_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json.gz")
 WORKING_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.json")
 TEMP_DATASET_PATH = Path("code/backend/data/ip_geolocation/ipinfo_lite.tmp.json")
 event_logger = get_component_event_logger("ip_geo_ipinfo_gz_extractor", "bgpx.tasks.ip_geo.ipinfo_gz_extractor")
+
+_LOCALHOST_OVERRIDE_RECORD = {
+    "network": "127.0.0.0/30",
+    "country": "Your PC",
+    "country_code": "YP",
+    "continent": "Planet Earth",
+    "continent_code": "PE",
+    "asn": "AS_198",
+    "as_name": "BGPX Team",
+    "as_domain": "bgpx.net",
+}
+_LOCALHOST_OVERRIDE_LINE = json.dumps(_LOCALHOST_OVERRIDE_RECORD, ensure_ascii=False)
 
 
 @dataclass(frozen=True)
@@ -164,6 +177,38 @@ class IpGeolocationIpinfoGzExtractor:
         with gzip.open(self._gz_source_path, "rb") as gz_file:
             with self._temp_dataset_path.open("wb") as temp_file:
                 shutil.copyfileobj(gz_file, temp_file)
+        self._ensure_localhost_override_in_temp_json()
+
+    def _ensure_localhost_override_in_temp_json(self) -> None:
+        """Ensure custom localhost override line exists at top of extracted NDJSON."""
+        content = self._temp_dataset_path.read_text(encoding="utf-8")
+        lines = content.splitlines()
+
+        if not lines:
+            self._temp_dataset_path.write_text(f"{_LOCALHOST_OVERRIDE_LINE}\n", encoding="utf-8")
+            event_logger.log(
+                "localhost_override_added",
+                "INFO",
+                "IPinfo .gz extractor added localhost override as first dataset line",
+            )
+            return
+
+        if lines[0].strip() == _LOCALHOST_OVERRIDE_LINE:
+            event_logger.log(
+                "localhost_override_already_present",
+                "DEBUG",
+                "IPinfo .gz extractor verified localhost override already exists as first line",
+            )
+            return
+
+        filtered_lines = [line for line in lines if line.strip() != _LOCALHOST_OVERRIDE_LINE]
+        rebuilt_content = "\n".join([_LOCALHOST_OVERRIDE_LINE, *filtered_lines]) + "\n"
+        self._temp_dataset_path.write_text(rebuilt_content, encoding="utf-8")
+        event_logger.log(
+            "localhost_override_added",
+            "INFO",
+            "IPinfo .gz extractor prepended localhost override to dataset",
+        )
 
     def _should_replace_working_dataset(self) -> bool:
         if not self._working_dataset_path.exists():

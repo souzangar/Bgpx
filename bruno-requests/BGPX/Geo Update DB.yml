@@ -6,6 +6,9 @@ info:
 http:
   method: POST
   url: https://localhost/api/ipinfo_update
+  headers:
+    - name: X-Admin-Token
+      value: amir@2026
   auth: inherit
 
 settings:

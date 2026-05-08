@@ -99,6 +99,14 @@
           "enabled": true,
           "level": "INFO"
         },
+        "localhost_override_present": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "localhost_override_missing": {
+          "enabled": true,
+          "level": "WARNING"
+        },
         "chunk_published": {
           "enabled": true,
           "level": "DEBUG"
@@ -135,6 +143,14 @@
           "level": "INFO"
         },
         "keep_working_dataset": {
+          "enabled": true,
+          "level": "DEBUG"
+        },
+        "localhost_override_added": {
+          "enabled": true,
+          "level": "INFO"
+        },
+        "localhost_override_already_present": {
           "enabled": true,
           "level": "DEBUG"
         },

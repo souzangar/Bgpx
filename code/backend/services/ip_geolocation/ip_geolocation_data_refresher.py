@@ -41,6 +41,18 @@ from services.logging.logging_service import get_component_event_logger
 event_logger = get_component_event_logger("ip_geo_refresher", "bgpx.tasks.ip_geo.refresher")
 
 
+_LOCALHOST_OVERRIDE_EXPECTED = {
+    "network": "127.0.0.0/30",
+    "country": "Your PC",
+    "country_code": "YP",
+    "continent": "Planet Earth",
+    "continent_code": "PE",
+    "asn": "AS_198",
+    "as_name": "BGPX Team",
+    "as_domain": "bgpx.net",
+}
+
+
 @dataclass(frozen=True)
 class SourceFingerprint:
     """Lightweight source fingerprint used for change detection."""
@@ -171,6 +183,7 @@ class IpGeolocationDataRefresher:
 
         try:
             read_result = self._adapter.read_records()
+            self._log_localhost_override_validation(read_result)
             if self._try_skip_for_equivalent_snapshot(read_result, next_fingerprint):
                 return
 
@@ -205,6 +218,42 @@ class IpGeolocationDataRefresher:
                 self.refresh_failure_count,
                 self.last_refresh_error,
             )
+
+    def _log_localhost_override_validation(self, read_result: IpGeolocationReadResult) -> None:
+        """Log-only defensive validation for localhost override first-record presence."""
+        if not read_result.records:
+            event_logger.log(
+                "localhost_override_missing",
+                "WARNING",
+                "IP geolocation dataset is empty; localhost override first-record validation failed",
+            )
+            return
+
+        first_record = read_result.records[0]
+        is_match = (
+            first_record.network == _LOCALHOST_OVERRIDE_EXPECTED["network"]
+            and first_record.country == _LOCALHOST_OVERRIDE_EXPECTED["country"]
+            and first_record.country_code == _LOCALHOST_OVERRIDE_EXPECTED["country_code"]
+            and first_record.continent == _LOCALHOST_OVERRIDE_EXPECTED["continent"]
+            and first_record.continent_code == _LOCALHOST_OVERRIDE_EXPECTED["continent_code"]
+            and first_record.asn == _LOCALHOST_OVERRIDE_EXPECTED["asn"]
+            and first_record.as_name == _LOCALHOST_OVERRIDE_EXPECTED["as_name"]
+            and first_record.as_domain == _LOCALHOST_OVERRIDE_EXPECTED["as_domain"]
+        )
+
+        if is_match:
+            event_logger.log(
+                "localhost_override_present",
+                "DEBUG",
+                "IP geolocation localhost override validation passed (first record verified)",
+            )
+            return
+
+        event_logger.log(
+            "localhost_override_missing",
+            "WARNING",
+            "IP geolocation localhost override validation failed; first record does not match expected override",
+        )
 
     def _try_skip_for_equivalent_snapshot(
         self,

@@ -467,6 +467,29 @@ The process that updates `ipinfo_lite.json` should use atomic replace semantics:
 
 This minimizes partial-write exposure and makes inode/mtime-based detection reliable in practice.
 
+### 8.5 Localhost override contract (`127.0.0.0/30`)
+
+To guarantee stable local testing semantics, the geolocation pipeline enforces a fixed localhost override NDJSON record:
+
+```json
+{"network":"127.0.0.0/30","country":"Your PC","country_code":"YP","continent":"Planet Earth","continent_code":"PE","asn":"AS_197","as_name":"BGPX Team","as_domain":"bgpx.net"}
+```
+
+Boundary and behavior rules:
+
+1. **Extractor (`ip_geolocation_ipinfo_gz_extractor.py`) is the writer/owner**
+   - after `.gz` extraction, it ensures this record exists as the **first line**,
+   - if missing, it prepends it,
+   - if duplicated elsewhere, it deduplicates to a single first-line copy.
+
+2. **Refresher (`ip_geolocation_data_refresher.py`) is validation-only**
+   - it does not mutate files,
+   - it emits defensive logs for presence/mismatch of the expected first record.
+
+3. **Observability alignment**
+   - extractor/refresher events for this contract must be present in
+     `code/backend/data/configs/logging_config.json`.
+
 ---
 
 ## 9) Public Service Interface (Planned)

@@ -12,6 +12,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from infra.ip_geolocation import IpGeolocationReadResult
+from models.ip_geolocation import IpGeolocationRecordModel
 from services.ip_geolocation.ip_geolocation_data_refresher import IpGeolocationDataRefresher
 
 
@@ -47,6 +48,19 @@ class _FakeStat:
     def __init__(self, inode: int, mtime_ns: int) -> None:
         self.st_ino = inode
         self.st_mtime_ns = mtime_ns
+
+
+def _localhost_override_record() -> IpGeolocationRecordModel:
+    return IpGeolocationRecordModel(
+        network="127.0.0.0/30",
+        country="Your PC",
+        country_code="YP",
+        continent="Planet Earth",
+        continent_code="PE",
+        asn="AS_197",
+        as_name="BGPX Team",
+        as_domain="bgpx.net",
+    )
 
 
 def test_refresher_skips_publish_when_fingerprint_unchanged() -> None:
@@ -150,7 +164,8 @@ def test_refresher_info_logs_show_refresh_events(monkeypatch, caplog) -> None:
     assert any("source change detected" in message for message in messages)
     assert all("refresh chunk published" not in message for message in messages)
     assert any("snapshot refresh succeeded" in message for message in messages)
-    assert len(messages) == 2
+    assert any("localhost override first-record validation failed" in message for message in messages)
+    assert len(messages) == 3
 
 
 def test_refresher_debug_logs_each_chunk_publish(caplog) -> None:
@@ -194,7 +209,10 @@ def test_refresher_warning_level_suppresses_info_and_debug_logs(caplog) -> None:
         refresher.run_once()
 
     assert len(published) == 1
-    assert caplog.records == []
+    messages = [record.getMessage() for record in caplog.records]
+    assert all("source change detected" not in message for message in messages)
+    assert all("snapshot refresh succeeded" not in message for message in messages)
+    assert any("localhost override first-record validation failed" in message for message in messages)
 
 
 def test_refresher_debug_logs_include_unchanged_cycle(caplog) -> None:
@@ -349,3 +367,45 @@ def test_refresher_falls_back_to_full_publish_when_delta_rejected() -> None:
     assert len(published) == 2
     assert refresher.refresh_attempt_count == 2
     assert refresher.refresh_success_count == 2
+
+
+def test_refresher_debug_logs_localhost_override_present(caplog) -> None:
+    """Refresher should log debug when localhost override is present as first record."""
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda _result, _metadata: None,
+        adapter=_FakeAdapter(IpGeolocationReadResult(records=[_localhost_override_record()], total_lines=1, malformed_lines=0)),
+        stat_func=lambda _path: _FakeStat(10, 1000),
+        sleep_func=lambda _seconds: None,
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="bgpx.tasks.ip_geo.refresher"):
+        refresher.run_once()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("localhost override validation passed" in message for message in messages)
+
+
+def test_refresher_warns_when_localhost_override_missing(caplog) -> None:
+    """Refresher should warn when first record is not the expected localhost override."""
+    non_override_record = IpGeolocationRecordModel(
+        network="1.1.1.0/24",
+        country="AU",
+        country_code="AU",
+        continent="Oceania",
+        continent_code="OC",
+        asn="AS13335",
+        as_name="Cloudflare",
+        as_domain="cloudflare.com",
+    )
+    refresher = IpGeolocationDataRefresher(
+        publish_snapshot=lambda _result, _metadata: None,
+        adapter=_FakeAdapter(IpGeolocationReadResult(records=[non_override_record], total_lines=1, malformed_lines=0)),
+        stat_func=lambda _path: _FakeStat(10, 1000),
+        sleep_func=lambda _seconds: None,
+    )
+
+    with caplog.at_level(logging.WARNING, logger="bgpx.tasks.ip_geo.refresher"):
+        refresher.run_once()
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("localhost override validation failed" in message for message in messages)
