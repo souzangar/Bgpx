@@ -21,17 +21,17 @@ const fieldRows: Array<{ label: string; key: keyof ClientIpInfoResponse }> = [
 export function Hero({ onRunCheck, onViewExamples, clientIpInfoState }: Readonly<HeroProps>) {
   return (
     <section className="panel-highlight rounded-bgpx-panel border border-white/10 p-6 shadow-2xl shadow-cyan-950/20 backdrop-blur sm:p-8">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-center">
+      <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
         <div className="space-y-5">
           <p className="text-xs font-mono uppercase tracking-[0.22em] text-bgpx-cyan">BGPX Looking Glass</p>
-          <h1 className="text-4xl font-semibold tracking-tight text-slate-100 sm:text-5xl lg:text-6xl">
+          <h1 className="text-3xl font-semibold tracking-tight text-slate-100 sm:text-4xl lg:text-5xl">
             {'Network diagnostics,'}
             {' '}
             <span className="bg-gradient-to-r from-cyan-300 via-sky-400 to-indigo-300 bg-clip-text text-transparent">
               exposed cleanly.
             </span>
           </h1>
-          <p className="max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
+          <p className="max-w-2xl text-xs leading-6 text-slate-300 sm:text-sm">
             BGPX is a lightweight looking glass for operational checks like ping and traceroute through a single
             HTTPS endpoint.
           </p>
@@ -49,7 +49,7 @@ export function Hero({ onRunCheck, onViewExamples, clientIpInfoState }: Readonly
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
             <span className="h-2.5 w-2.5 rounded-full bg-green-400/70" />
           </div>
-          <p className="mb-3 text-xs font-mono uppercase tracking-[0.22em] text-slate-500">Client IP info</p>
+          <p className="mb-3 text-[11px] font-mono uppercase tracking-[0.18em] text-slate-500">Client IP info</p>
 
           {clientIpInfoState.loading && (
             <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-3 text-xs text-slate-400">
@@ -64,12 +64,12 @@ export function Hero({ onRunCheck, onViewExamples, clientIpInfoState }: Readonly
           )}
 
           {!clientIpInfoState.loading && !clientIpInfoState.error && (
-            <dl className="space-y-2 rounded-xl border border-slate-800/80 bg-slate-900/30 p-3">
+            <dl className="space-y-1.5 rounded-xl border border-slate-800/80 bg-slate-900/30 p-3">
               {fieldRows.map((row) => {
                 const value = clientIpInfoState.data?.[row.key]
                 return (
-                  <div key={row.key} className="grid grid-cols-[8.5rem_minmax(0,1fr)] items-start gap-2 text-xs">
-                    <dt className="font-mono uppercase tracking-wide text-slate-500">{row.label}</dt>
+                  <div key={row.key} className="grid grid-cols-[8rem_minmax(0,1fr)] items-start gap-2 text-[11px]">
+                    <dt className="font-mono uppercase tracking-[0.08em] text-slate-500">{row.label}</dt>
                     <dd className="break-all font-mono text-slate-200">{value ?? 'N/A'}</dd>
                   </div>
                 )
