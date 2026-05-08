@@ -274,3 +274,150 @@ def test_post_ipinfo_update_rejects_missing_admin_token(monkeypatch, tmp_path: P
     finally:
         reset_admin_token_auth_config_cache_for_tests()
         reset_background_task_runner_for_tests()
+
+
+def test_get_root_ip_returns_single_line_plain_text_and_uses_forwarded_header() -> None:
+    """GET /ip should return a one-line plain-text IP and prefer X-Forwarded-For first hop."""
+    reset_background_task_runner_for_tests()
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.get("/ip", headers={"X-Forwarded-For": "1.2.3.4, 10.0.0.1"})
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert response.text == "1.2.3.4\n"
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_get_root_returns_client_ip_info_json_payload(monkeypatch) -> None:
+    """GET / should return client IP geolocation fields as JSON payload."""
+    reset_background_task_runner_for_tests()
+
+    @dataclass(frozen=True)
+    class _StubLookupData:
+        ip: str
+        network: str | None
+        country: str | None
+        country_code: str | None
+        continent: str | None
+        continent_code: str | None
+        asn: str | None
+        as_name: str | None
+        as_domain: str | None
+
+    @dataclass(frozen=True)
+    class _StubLookup:
+        status: str
+        data: _StubLookupData
+
+    monkeypatch.setattr(
+        "api.ip_geolocation_api.lookup_client_ip_geolocation",
+        lambda x_forwarded_for, client_host: _StubLookup(
+            status="success",
+            data=_StubLookupData(
+                ip="1.1.1.1",
+                network="1.1.1.0/24",
+                country="Australia",
+                country_code="AU",
+                continent="Oceania",
+                continent_code="OC",
+                asn="AS13335",
+                as_name="Cloudflare, Inc.",
+                as_domain="cloudflare.com",
+            ),
+        ),
+    )
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.get("/")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload == {
+            "ip": "1.1.1.1",
+            "network": "1.1.1.0/24",
+            "country": "Australia",
+            "country_code": "AU",
+            "continent": "Oceania",
+            "continent_code": "OC",
+            "asn": "AS13335",
+            "as_name": "Cloudflare, Inc.",
+            "as_domain": "cloudflare.com",
+        }
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_get_root_asn_returns_single_line_plain_text(monkeypatch) -> None:
+    """GET /asn should return ASN as one-line plain text when lookup returns ASN payload."""
+    reset_background_task_runner_for_tests()
+
+    @dataclass(frozen=True)
+    class _StubAsnData:
+        asn: str
+
+    @dataclass(frozen=True)
+    class _StubLookup:
+        status: str
+        resolution_state: str
+        data: _StubAsnData
+
+    monkeypatch.setattr(
+        "api.ip_geolocation_api.lookup_client_asn_geolocation",
+        lambda x_forwarded_for, client_host: _StubLookup(
+            status="success",
+            resolution_state="found",
+            data=_StubAsnData(asn="AS13335"),
+        ),
+    )
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.get("/asn")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert response.text == "AS13335\n"
+    finally:
+        reset_background_task_runner_for_tests()
+
+
+def test_get_root_country_returns_single_line_plain_text(monkeypatch) -> None:
+    """GET /country should return country code as one-line plain text when available."""
+    reset_background_task_runner_for_tests()
+
+    @dataclass(frozen=True)
+    class _StubCountryData:
+        country: str
+
+    @dataclass(frozen=True)
+    class _StubLookup:
+        status: str
+        resolution_state: str
+        data: _StubCountryData
+
+    monkeypatch.setattr(
+        "api.ip_geolocation_api.lookup_client_country_geolocation",
+        lambda x_forwarded_for, client_host: _StubLookup(
+            status="success",
+            resolution_state="found",
+            data=_StubCountryData(country="US"),
+        ),
+    )
+
+    try:
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.get("/country")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert response.text == "US\n"
+    finally:
+        reset_background_task_runner_for_tests()

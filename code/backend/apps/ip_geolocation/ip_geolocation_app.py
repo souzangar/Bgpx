@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import ipaddress
 
 from fastapi import HTTPException
 
@@ -41,6 +42,61 @@ def get_ip_geolocation_service() -> IpGeolocationService:
 def lookup_ip_geolocation(ip: str) -> IpGeolocationLookupResponseModel:
     """Resolve a requested IP using service-layer lookup contract."""
     return get_ip_geolocation_service().lookup_ip_geolocation(ip)
+
+
+def resolve_client_ip_address(x_forwarded_for: str | None, client_host: str | None) -> str:
+    """Resolve request client IP from forwarding header or direct client host."""
+    forwarded_value = (x_forwarded_for or "").strip()
+    if forwarded_value:
+        first_hop = forwarded_value.split(",", maxsplit=1)[0].strip()
+        if first_hop:
+            return _normalize_ip_text(first_hop)
+
+    if client_host is None or not client_host.strip():
+        return "unknown"
+
+    return _normalize_ip_text(client_host)
+
+
+def lookup_client_ip_geolocation(
+    x_forwarded_for: str | None,
+    client_host: str | None,
+) -> IpGeolocationLookupResponseModel:
+    """Resolve geolocation lookup for request-derived client IP address."""
+    client_ip = resolve_client_ip_address(x_forwarded_for, client_host)
+    return lookup_ip_geolocation(client_ip)
+
+
+def lookup_client_asn_geolocation(
+    x_forwarded_for: str | None,
+    client_host: str | None,
+) -> IpGeolocationLookupResponseModel:
+    """Resolve ASN lookup using request-derived client IP address."""
+    client_lookup = lookup_client_ip_geolocation(x_forwarded_for, client_host)
+    if client_lookup.status == "failure":
+        return client_lookup
+
+    client_asn = getattr(client_lookup.data, "asn", None)
+    if client_asn is None or not client_asn.strip():
+        return client_lookup
+
+    return lookup_asn_geolocation(client_asn)
+
+
+def lookup_client_country_geolocation(
+    x_forwarded_for: str | None,
+    client_host: str | None,
+) -> IpGeolocationLookupResponseModel:
+    """Resolve country lookup using request-derived client IP address."""
+    client_lookup = lookup_client_ip_geolocation(x_forwarded_for, client_host)
+    if client_lookup.status == "failure":
+        return client_lookup
+
+    client_country_code = getattr(client_lookup.data, "country_code", None)
+    if client_country_code is None or not client_country_code.strip():
+        return client_lookup
+
+    return lookup_country_geolocation(client_country_code)
 
 
 def lookup_asn_geolocation(asn: str) -> IpGeolocationLookupResponseModel:
@@ -100,3 +156,16 @@ def force_ipinfo_gz_update() -> IpinfoForceUpdateResponseModel:
         last_succeeded_at=downloader.last_download_succeeded_at,
         last_error=downloader.last_download_error,
     )
+
+
+def _normalize_ip_text(ip_text: str) -> str:
+    """Normalize textual IP representation, including IPv6-mapped IPv4."""
+    try:
+        parsed = ipaddress.ip_address(ip_text.strip())
+    except ValueError:
+        return ip_text.strip()
+
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped is not None:
+        return str(parsed.ipv4_mapped)
+
+    return str(parsed)

@@ -172,3 +172,19 @@ As complexity grows:
 3. Keep API layer focused on route composition and transport concerns
 
 This approach keeps features maintainable as the backend evolves.
+
+---
+
+## 14) Client-IP Shortcut Orchestration Pattern
+
+For root-level transport shortcuts such as `GET /`, `GET /ip`, `GET /asn`, and `GET /country`:
+
+- API layer extracts transport client context (`X-Forwarded-For`, direct client host).
+- App layer resolves canonical client IP and orchestrates lookup sequencing.
+- Service layer remains the single source of geolocation decision logic.
+
+App-layer responsibilities in this pattern:
+- keep normalization/orchestration helpers reusable,
+- avoid embedding route/HTTP framework details,
+- delegate all business lookup behavior to `services/ip_geolocation` methods,
+- keep client-IP lookup output mapping stable for both JSON (`/`) and single-line plain-text shortcut handlers.

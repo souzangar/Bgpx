@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from api import router as api_router
+from api.router_root import router as api_root_router
 from services.background_task_runner.ip_geolocation_lifespan import app_lifespan
 from services.logging import configure_backend_logging
 from services.sslCert import ensure_ssl_files
@@ -162,6 +163,7 @@ def create_app(frontend_mode: str | None = None, frontend_dev_url: str | None = 
     configure_backend_logging()
     app = FastAPI(title="BGPX Backend", version="0.1.0", lifespan=app_lifespan)
     app.include_router(api_router, prefix="/api")
+    app.include_router(api_root_router)
 
     backend_dir = Path(__file__).resolve().parent
     frontend_dist = backend_dir.parent / "frontend" / "dist"

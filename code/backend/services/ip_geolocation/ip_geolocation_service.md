@@ -717,6 +717,26 @@ Suggested endpoints:
 - `GET /api/geo/status`
 - `POST /api/geo/reload` (optional)
 
+### 10.2 Root-level client shortcut endpoints
+
+In addition to `/api` feature routes, the API layer can expose root-level shortcuts for client-origin lookups:
+
+- `GET /`
+- `GET /ip`
+- `GET /asn`
+- `GET /country`
+
+Boundary contract for these shortcuts:
+
+1. API layer remains transport-only and extracts request client context (`X-Forwarded-For` first hop, fallback to direct client host).
+2. App layer orchestrates client-IP normalization and lookup chaining.
+3. Service layer remains unchanged and continues to provide canonical lookup contracts:
+   - `lookup_ip_geolocation`
+   - `lookup_asn_geolocation`
+   - `lookup_country_geolocation`
+
+This keeps root-path convenience endpoints additive without introducing domain logic into transport modules.
+
 ### 10.1 Manual IPinfo .gz force-update endpoint
 
 In addition to scheduled background execution (`ipinfo_gz_downloader` task), the API layer exposes:

@@ -205,3 +205,26 @@ Manual force-update route:
 - `POST /api/ipinfo_update`
 - Triggers one immediate `IpGeolocationIpinfoGzDownloader.run_once()` cycle via app layer orchestration.
 - Protected by admin token guard via `X-Admin-Token` header.
+
+Additional root-level plain-text shortcuts (non-`/api`):
+
+- `GET /`
+  - Returns client IP geolocation JSON fields for curl-friendly root lookup:
+    - `ip`, `network`, `country`, `country_code`, `continent`, `continent_code`, `asn`, `as_name`, `as_domain`.
+  - Client IP resolution order:
+    1. first hop from `X-Forwarded-For` (if present),
+    2. fallback to direct transport client host.
+
+- `GET /ip`
+  - Returns a single-line plain-text client IP for curl-friendly usage.
+  - Client IP resolution order:
+    1. first hop from `X-Forwarded-For` (if present),
+    2. fallback to direct transport client host.
+
+- `GET /asn`
+  - Resolves request client IP first, then returns a single-line plain-text ASN.
+  - If unresolved, returns a single-line resolution token (`initializing_db` or `not_found`) or `failed` on service failure.
+
+- `GET /country`
+  - Resolves request client IP first, then returns a single-line plain-text country code.
+  - If unresolved, returns a single-line resolution token (`initializing_db` or `not_found`) or `failed` on service failure.
