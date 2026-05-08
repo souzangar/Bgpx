@@ -754,6 +754,12 @@ Layered flow:
 Behavior:
 - endpoint returns a structured execution summary including attempt/success/failure counters and last error status for that forced run.
 - periodic background task wiring remains unchanged; this endpoint is additive and does not replace scheduled updates.
+- downloader HTTP fetch explicitly enables redirect following (`follow_redirects=True`) because the IPinfo download endpoint can return `302 Found` to a temporary asset URL.
+
+Security contract for downloader errors/logging:
+- `ip_geolocation_ipinfo_gz_downloader.py` must never expose raw IPinfo `api_token` values in logs or runtime error state fields (for example `last_download_error`).
+- Any error text that may include request URLs must sanitize sensitive query parameters (at minimum `token`) before persistence or logging.
+- Infrastructure HTTP client loggers that may emit full request URLs (`httpx`, `httpcore`) must be configured at `WARNING` or higher in `code/backend/data/configs/logging_config.json` to prevent INFO-level URL token leakage.
 
 ---
 

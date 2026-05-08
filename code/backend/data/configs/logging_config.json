@@ -51,6 +51,14 @@
     "bgpx.runner.background_task_runner": {
       "level": "WARNING",
       "propagate": true
+    },
+    "httpx": {
+      "level": "WARNING",
+      "propagate": true
+    },
+    "httpcore": {
+      "level": "WARNING",
+      "propagate": true
     }
   },
   "components": {
@@ -109,7 +117,7 @@
         },
         "chunk_published": {
           "enabled": true,
-          "level": "DEBUG"
+          "level": "INFO"
         }
       }
     },

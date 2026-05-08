@@ -57,7 +57,7 @@ def _localhost_override_record() -> IpGeolocationRecordModel:
         country_code="YP",
         continent="Planet Earth",
         continent_code="PE",
-        asn="AS_197",
+        asn="AS_198",
         as_name="BGPX Team",
         as_domain="bgpx.net",
     )
@@ -163,9 +163,10 @@ def test_refresher_info_logs_show_refresh_events(monkeypatch, caplog) -> None:
     messages = [record.getMessage() for record in caplog.records]
     assert any("source change detected" in message for message in messages)
     assert all("refresh chunk published" not in message for message in messages)
+    assert any("IP geo chunk published" in message for message in messages)
     assert any("snapshot refresh succeeded" in message for message in messages)
     assert any("localhost override first-record validation failed" in message for message in messages)
-    assert len(messages) == 3
+    assert len(messages) == 4
 
 
 def test_refresher_debug_logs_each_chunk_publish(caplog) -> None:
@@ -187,11 +188,18 @@ def test_refresher_debug_logs_each_chunk_publish(caplog) -> None:
         refresher.run_once()
 
     chunk_messages = [record.getMessage() for record in caplog.records if "refresh chunk published" in record.getMessage()]
+    if not chunk_messages:
+        chunk_messages = [record.getMessage() for record in caplog.records if "IP geo chunk published" in record.getMessage()]
+
     assert len(chunk_messages) == 2
     assert "chunk=1" in chunk_messages[0]
-    assert "is_final_chunk=False" in chunk_messages[0]
+    assert "records=0" in chunk_messages[0]
+    assert "published=0" in chunk_messages[0]
+    assert "final=False" in chunk_messages[0]
     assert "chunk=2" in chunk_messages[1]
-    assert "is_final_chunk=True" in chunk_messages[1]
+    assert "records=0" in chunk_messages[1]
+    assert "published=0" in chunk_messages[1]
+    assert "final=True" in chunk_messages[1]
 
 
 def test_refresher_warning_level_suppresses_info_and_debug_logs(caplog) -> None:

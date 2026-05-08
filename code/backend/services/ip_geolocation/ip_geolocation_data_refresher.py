@@ -325,6 +325,7 @@ class IpGeolocationDataRefresher:
             iter_reader(chunk_size=self._publish_chunk_size),
         )
         chunk_index = 0
+        published_records = 0
         last_read_result: IpGeolocationReadResult | None = None
         current_chunk = next(chunk_results, None)
 
@@ -338,11 +339,13 @@ class IpGeolocationDataRefresher:
                 is_final_chunk=is_final_chunk,
             )
             self._publish_snapshot(current_chunk, metadata)
+            published_records += len(current_chunk.records)
             self._log_chunk_publish(
                 chunk_index=chunk_index,
                 is_final_chunk=is_final_chunk,
                 read_result=current_chunk,
                 refresh_started_at=refresh_started_at,
+                published_records=published_records,
             )
             last_read_result = current_chunk
             current_chunk = next_chunk
@@ -363,6 +366,7 @@ class IpGeolocationDataRefresher:
             read_result=read_result,
             refresh_started_at=refresh_started_at,
             chunk_total=1,
+            published_records=len(read_result.records),
         )
 
     def _build_publish_metadata(
@@ -386,6 +390,7 @@ class IpGeolocationDataRefresher:
         is_final_chunk: bool,
         read_result: IpGeolocationReadResult,
         refresh_started_at: float,
+        published_records: int,
         chunk_total: int | None = None,
     ) -> None:
         secs_elapsed = time.monotonic() - refresh_started_at
@@ -393,13 +398,11 @@ class IpGeolocationDataRefresher:
         event_logger.log(
             "chunk_published",
             "DEBUG",
-            "IP geolocation refresh chunk published "
-            "(chunk=%s, is_final_chunk=%s, total_lines=%s, loaded_records=%s, malformed_lines=%s, secs_elapsed=%.2f)",
+            "IP geo chunk published (chunk=%s, records=%s, published=%s, final=%s, elapsed=%.2fs)",
             chunk_value,
-            is_final_chunk,
-            read_result.total_lines,
             len(read_result.records),
-            read_result.malformed_lines,
+            published_records,
+            is_final_chunk,
             secs_elapsed,
         )
 

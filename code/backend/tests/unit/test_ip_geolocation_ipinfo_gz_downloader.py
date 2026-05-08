@@ -27,9 +27,10 @@ def test_downloader_downloads_with_token_and_writes_output(tmp_path: Path) -> No
 
     captured: dict[str, object] = {}
 
-    def _http_get(url: str, timeout: float) -> httpx.Response:
+    def _http_get(url: str, timeout: float, follow_redirects: bool) -> httpx.Response:
         captured["url"] = url
         captured["timeout"] = timeout
+        captured["follow_redirects"] = follow_redirects
         return httpx.Response(
             status_code=200,
             content=b"gz-bytes",
@@ -47,6 +48,7 @@ def test_downloader_downloads_with_token_and_writes_output(tmp_path: Path) -> No
 
     assert captured["url"] == "https://ipinfo.io/data/ipinfo_lite.json.gz?_src=frontend&token=abc123"
     assert captured["timeout"] == pytest.approx(120.0)
+    assert captured["follow_redirects"] is True
     assert output_path.read_bytes() == b"gz-bytes"
     assert temp_path.exists() is False
     assert downloader.download_success_count == 1
@@ -87,7 +89,8 @@ def test_downloader_unauthorized_logs_single_line_without_traceback(caplog, tmp_
     temp_path = tmp_path / "ipinfo_lite.json.gz.tmp"
     config_path.write_text('{"api_token": "bad-token"}', encoding="utf-8")
 
-    def _http_get(url: str, timeout: float) -> httpx.Response:
+    def _http_get(url: str, timeout: float, follow_redirects: bool) -> httpx.Response:
+        assert follow_redirects is True
         request = httpx.Request("GET", url)
         response = httpx.Response(status_code=401, request=request)
         raise httpx.HTTPStatusError("401 unauthorized", request=request, response=response)
@@ -107,10 +110,12 @@ def test_downloader_unauthorized_logs_single_line_without_traceback(caplog, tmp_
     assert downloader.download_success_count == 0
     assert downloader.last_download_error is not None
     assert "401" in downloader.last_download_error
+    assert "bad-token" not in downloader.last_download_error
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("download unauthorized" in message for message in messages)
     assert all("Traceback" not in message for message in messages)
+    assert all("bad-token" not in message for message in messages)
 
 
 def test_downloader_missing_config_file_returns_normalized_message(tmp_path: Path) -> None:

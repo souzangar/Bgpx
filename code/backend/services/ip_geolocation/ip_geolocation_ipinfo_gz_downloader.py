@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import json
 from pathlib import Path
 import shutil
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from typing import Callable
 
 import httpx
@@ -71,7 +72,7 @@ class IpGeolocationIpinfoGzDownloader:
             url = IPINFO_URL_TEMPLATE.format(token=config.api_token)
 
             event_logger.log("download_started", "INFO", "IPinfo .gz download started")
-            response = self._http_get(url, timeout=120.0)
+            response = self._http_get(url, timeout=120.0, follow_redirects=True)
             response.raise_for_status()
 
             self._write_response_atomically(response.content)
@@ -86,7 +87,7 @@ class IpGeolocationIpinfoGzDownloader:
                 self._output_path,
             )
         except httpx.HTTPStatusError as exc:
-            self.last_download_error = str(exc) or exc.__class__.__name__
+            self.last_download_error = self._sanitize_sensitive_text(str(exc)) or exc.__class__.__name__
             self.download_failure_count += 1
             status_code = exc.response.status_code
             if status_code == 401:
@@ -107,7 +108,7 @@ class IpGeolocationIpinfoGzDownloader:
                 )
             self._delete_temp_if_exists()
         except Exception as exc:
-            self.last_download_error = str(exc) or exc.__class__.__name__
+            self.last_download_error = self._sanitize_sensitive_text(str(exc)) or exc.__class__.__name__
             self.download_failure_count += 1
             event_logger.log(
                 "download_failed",
@@ -117,6 +118,43 @@ class IpGeolocationIpinfoGzDownloader:
                 self.last_download_error,
             )
             self._delete_temp_if_exists()
+
+    def _sanitize_sensitive_text(self, text: str) -> str:
+        """Redact sensitive query parameters if present in free-form text."""
+        if not text:
+            return text
+
+        token_marker = "token="
+        if token_marker not in text:
+            return text
+
+        split_text = text.split()
+        sanitized_parts: list[str] = []
+        for part in split_text:
+            sanitized_parts.append(self._sanitize_url_token(part))
+        return " ".join(sanitized_parts)
+
+    def _sanitize_url_token(self, value: str) -> str:
+        """Redact token query parameter in URL-like values."""
+        if "token=" not in value:
+            return value
+
+        try:
+            parsed = urlsplit(value)
+            if not parsed.query:
+                return value
+
+            redacted_items: list[tuple[str, str]] = []
+            for key, item_value in parse_qsl(parsed.query, keep_blank_values=True):
+                if key.lower() == "token":
+                    redacted_items.append((key, "<REDACTED>"))
+                else:
+                    redacted_items.append((key, item_value))
+
+            redacted_query = urlencode(redacted_items)
+            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, redacted_query, parsed.fragment))
+        except Exception:
+            return value
 
     def _load_config(self) -> IpinfoDownloaderConfig:
         try:
