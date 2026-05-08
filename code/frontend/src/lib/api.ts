@@ -1,4 +1,4 @@
-import type { HealthResponse, PingResponse, TracerouteResponse } from './types'
+import type { ClientIpInfoResponse, HealthResponse, PingResponse, TracerouteResponse } from './types'
 
 export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
@@ -7,12 +7,20 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
   })
 
   if (!response.ok) {
-    const detail = await (async () => {
+    const rawBody = await response.text()
+    const detail = (() => {
+      if (!rawBody) {
+        return ''
+      }
+
       try {
-        const payload = await response.json()
-        return typeof payload?.detail === 'string' ? payload.detail : JSON.stringify(payload)
+        const payload = JSON.parse(rawBody) as { detail?: unknown }
+        if (typeof payload.detail === 'string') {
+          return payload.detail
+        }
+        return JSON.stringify(payload)
       } catch {
-        return response.text()
+        return rawBody
       }
     })()
 
@@ -24,6 +32,10 @@ export async function getJson<T>(path: string, signal?: AbortSignal): Promise<T>
 
 export function fetchHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return getJson<HealthResponse>('/api/health', signal)
+}
+
+export function fetchClientIpInfo(signal?: AbortSignal): Promise<ClientIpInfoResponse> {
+  return getJson<ClientIpInfoResponse>('/api/client_ipinfo', signal)
 }
 
 export function fetchPing(host: string, signal?: AbortSignal): Promise<PingResponse> {

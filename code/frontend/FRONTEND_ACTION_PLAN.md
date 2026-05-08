@@ -518,7 +518,7 @@ Purpose:
 
 - Explain BGPX clearly.
 - Give immediate access to Ping and Traceroute tools.
-- Show a code/config style preview to match screenshots.
+- Show live client IP intelligence in the right-side frame to match the operational focus.
 
 Hero copy draft:
 
@@ -533,12 +533,20 @@ CTA buttons:
 - `Run a check` scrolls/focuses Ping form.
 - `View API examples` scrolls to examples section.
 
-Code card content:
+Right-side frame content:
 
-```bash
-curl -k "https://localhost/api/ping?host=1.1.1.1"
-curl -k "https://localhost/api/traceroute?host=8.8.8.8"
-```
+- Label: `Client IP info`
+- Fields shown:
+  - `IP`
+  - `Network`
+  - `Country`
+  - `Country Code`
+  - `Continent`
+  - `Continent Code`
+  - `ASN`
+  - `ASN Domain`
+- Data source: `GET /` root JSON response
+- UI behavior: loading + error placeholders before successful field render
 
 ### 9.2 Status Strip
 

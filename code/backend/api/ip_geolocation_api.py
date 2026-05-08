@@ -48,6 +48,38 @@ def get_ip_geo_status() -> dict[str, Any]:
     return _to_payload(get_ip_geolocation_load_status())
 
 
+@router.get("/client_ipinfo", tags=["ip-geolocation"])
+def get_client_ip_info_api(http_request: Request) -> dict[str, str | None]:
+    """Return request client IP geolocation info as JSON payload under /api."""
+    x_forwarded_for = http_request.headers.get("x-forwarded-for")
+    client_host = http_request.client.host if http_request.client is not None else None
+    lookup = lookup_client_ip_geolocation(x_forwarded_for=x_forwarded_for, client_host=client_host)
+
+    if lookup.status == "failure":
+        client_ip = resolve_client_ip_address(x_forwarded_for=x_forwarded_for, client_host=client_host)
+        return {
+            "ip": client_ip,
+            "network": None,
+            "country": None,
+            "country_code": None,
+            "continent": None,
+            "continent_code": None,
+            "asn": None,
+            "as_domain": None,
+        }
+
+    return {
+        "ip": getattr(lookup.data, "ip", None),
+        "network": getattr(lookup.data, "network", None),
+        "country": getattr(lookup.data, "country", None),
+        "country_code": getattr(lookup.data, "country_code", None),
+        "continent": getattr(lookup.data, "continent", None),
+        "continent_code": getattr(lookup.data, "continent_code", None),
+        "asn": getattr(lookup.data, "asn", None),
+        "as_domain": getattr(lookup.data, "as_domain", None),
+    }
+
+
 @router.post("/ipinfo_update", tags=["ip-geolocation"])
 def force_ipinfo_update(
     _auth: Annotated[AdminTokenValidationResultModel, Depends(require_admin_token)],

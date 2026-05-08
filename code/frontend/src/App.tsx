@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { BackgroundDecor } from './components/BackgroundDecor'
 import { TopNav, type HealthIndicatorTone } from './components/TopNav'
-import { fetchHealth, fetchPing, fetchTraceroute } from './lib/api'
+import { fetchClientIpInfo, fetchHealth, fetchPing, fetchTraceroute } from './lib/api'
 import { normalizeHostInput, toErrorMessage, validateHostInput } from './lib/format'
-import type { HealthResponse, PingResponse, RequestState, TracerouteResponse } from './lib/types'
+import type { ClientIpInfoResponse, HealthResponse, PingResponse, RequestState, TracerouteResponse } from './lib/types'
 import { ApiExamples } from './sections/ApiExamples'
 import { Hero } from './sections/Hero'
 import { Tools } from './sections/Tools'
@@ -29,8 +29,14 @@ function App() {
   const [tracerouteHost, setTracerouteHost] = useState('8.8.8.8')
   const [tracerouteValidationError, setTracerouteValidationError] = useState<string | null>(null)
   const [tracerouteState, setTracerouteState] = useState<RequestState<TracerouteResponse>>(emptyState)
+  const [clientIpInfoState, setClientIpInfoState] = useState<RequestState<ClientIpInfoResponse>>({
+    loading: true,
+    error: null,
+    data: null,
+  })
 
   const healthAbortRef = useRef<AbortController | null>(null)
+  const clientIpInfoAbortRef = useRef<AbortController | null>(null)
   const pingAbortRef = useRef<AbortController | null>(null)
   const tracerouteAbortRef = useRef<AbortController | null>(null)
 
@@ -99,6 +105,10 @@ function App() {
     const controller = new AbortController()
     healthAbortRef.current = controller
 
+    clientIpInfoAbortRef.current?.abort()
+    const clientIpInfoController = new AbortController()
+    clientIpInfoAbortRef.current = clientIpInfoController
+
     const bootstrapHealth = async () => {
       try {
         const result = await fetchHealth(controller.signal)
@@ -114,10 +124,27 @@ function App() {
       }
     }
 
+    const bootstrapClientIpInfo = async () => {
+      try {
+        const result = await fetchClientIpInfo(clientIpInfoController.signal)
+        if (clientIpInfoController.signal.aborted) {
+          return
+        }
+        setClientIpInfoState({ loading: false, error: null, data: result })
+      } catch (error) {
+        if (clientIpInfoController.signal.aborted) {
+          return
+        }
+        setClientIpInfoState({ loading: false, error: toErrorMessage(error), data: null })
+      }
+    }
+
     void bootstrapHealth()
+    void bootstrapClientIpInfo()
 
     return () => {
       controller.abort()
+      clientIpInfoController.abort()
       pingAbortRef.current?.abort()
       tracerouteAbortRef.current?.abort()
     }
@@ -154,7 +181,11 @@ function App() {
 
       <div className="mx-auto max-w-7xl px-4 py-8">
         <main className="min-w-0 space-y-10">
-          <Hero onRunCheck={focusPingInput} onViewExamples={scrollToExamples} />
+          <Hero
+            onRunCheck={focusPingInput}
+            onViewExamples={scrollToExamples}
+            clientIpInfoState={clientIpInfoState}
+          />
           <Tools
             pingHost={pingHost}
             pingValidationError={pingValidationError}

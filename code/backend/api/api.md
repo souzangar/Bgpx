@@ -201,6 +201,14 @@ Behavior notes:
 Status route remains:
 - `GET /api/ipinfo_status`
 
+Client IP info JSON route (frontend-safe, under `/api`):
+- `GET /api/client_ipinfo`
+- Returns client IP geolocation fields:
+  - `ip`, `network`, `country`, `country_code`, `continent`, `continent_code`, `asn`, `as_domain`.
+- Client IP resolution order:
+  1. first hop from `X-Forwarded-For` (if present),
+  2. fallback to direct transport client host.
+
 Manual force-update route:
 - `POST /api/ipinfo_update`
 - Triggers one immediate `IpGeolocationIpinfoGzDownloader.run_once()` cycle via app layer orchestration.

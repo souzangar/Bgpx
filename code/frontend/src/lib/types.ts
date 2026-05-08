@@ -30,6 +30,17 @@ export interface TracerouteResponse {
   message: string
 }
 
+export interface ClientIpInfoResponse {
+  ip: string | null
+  network: string | null
+  country: string | null
+  country_code: string | null
+  continent: string | null
+  continent_code: string | null
+  asn: string | null
+  as_domain: string | null
+}
+
 export interface RequestState<T> {
   loading: boolean
   error: string | null

@@ -1,15 +1,24 @@
 import { Button } from '../components/Button'
-import { CodeBlock } from '../components/CodeBlock'
+import type { ClientIpInfoResponse, RequestState } from '../lib/types'
 
 interface HeroProps {
   onRunCheck: () => void
   onViewExamples: () => void
+  clientIpInfoState: RequestState<ClientIpInfoResponse>
 }
 
-const heroCommands = `curl -k "https://localhost/api/ping?host=1.1.1.1"
-curl -k "https://localhost/api/traceroute?host=8.8.8.8"`
+const fieldRows: Array<{ label: string; key: keyof ClientIpInfoResponse }> = [
+  { label: 'IP', key: 'ip' },
+  { label: 'Network', key: 'network' },
+  { label: 'Country', key: 'country' },
+  { label: 'Country Code', key: 'country_code' },
+  { label: 'Continent', key: 'continent' },
+  { label: 'Continent Code', key: 'continent_code' },
+  { label: 'ASN', key: 'asn' },
+  { label: 'ASN Domain', key: 'as_domain' },
+]
 
-export function Hero({ onRunCheck, onViewExamples }: Readonly<HeroProps>) {
+export function Hero({ onRunCheck, onViewExamples, clientIpInfoState }: Readonly<HeroProps>) {
   return (
     <section className="panel-highlight rounded-bgpx-panel border border-white/10 p-6 shadow-2xl shadow-cyan-950/20 backdrop-blur sm:p-8">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-center">
@@ -40,7 +49,33 @@ export function Hero({ onRunCheck, onViewExamples }: Readonly<HeroProps>) {
             <span className="h-2.5 w-2.5 rounded-full bg-amber-400/70" />
             <span className="h-2.5 w-2.5 rounded-full bg-green-400/70" />
           </div>
-          <CodeBlock code={heroCommands} className="border-none bg-transparent p-0" />
+          <p className="mb-3 text-xs font-mono uppercase tracking-[0.22em] text-slate-500">Client IP info</p>
+
+          {clientIpInfoState.loading && (
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/40 p-3 text-xs text-slate-400">
+              Resolving client IP information...
+            </div>
+          )}
+
+          {!clientIpInfoState.loading && clientIpInfoState.error && (
+            <div className="rounded-xl border border-red-400/30 bg-red-950/30 p-3 text-xs text-red-100">
+              Failed to load client IP info: {clientIpInfoState.error}
+            </div>
+          )}
+
+          {!clientIpInfoState.loading && !clientIpInfoState.error && (
+            <dl className="space-y-2 rounded-xl border border-slate-800/80 bg-slate-900/30 p-3">
+              {fieldRows.map((row) => {
+                const value = clientIpInfoState.data?.[row.key]
+                return (
+                  <div key={row.key} className="grid grid-cols-[8.5rem_minmax(0,1fr)] items-start gap-2 text-xs">
+                    <dt className="font-mono uppercase tracking-wide text-slate-500">{row.label}</dt>
+                    <dd className="break-all font-mono text-slate-200">{value ?? 'N/A'}</dd>
+                  </div>
+                )
+              })}
+            </dl>
+          )}
         </div>
       </div>
     </section>
