@@ -69,6 +69,8 @@ async def app_lifespan(_app: FastAPI):
         publish_snapshot=ip_geolocation_service.publish_snapshot,
         is_snapshot_equivalent=ip_geolocation_service.is_snapshot_equivalent,
         apply_snapshot_delta=ip_geolocation_service.apply_snapshot_delta,
+        get_active_key_index=ip_geolocation_service.get_active_network_key_index,
+        apply_snapshot_delta_records=ip_geolocation_service.apply_snapshot_delta_records,
     )
 
     configured_ip_geo = get_background_tasks_config().ip_geolocation

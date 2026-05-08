@@ -17,6 +17,15 @@
     - `IpGeolocationLoadCountersModel`
   - Keeps error text behavior unchanged while preventing duplicated literals and aligning with static analysis expectations.
 
+## Memory Layout
+
+- `IpGeolocationRecordModel` is declared as `@dataclass(frozen=True, slots=True)`.
+  - `slots=True` eliminates the per-instance `__dict__` so each record holds
+    only its declared fields, materially reducing resident memory when the
+    active dataset contains millions of rows.
+  - Other DTOs remain without `slots` for flexibility; only the
+    record-cardinality type is optimized because it dominates total allocation.
+
 ## Notes
 - This layer exposes model symbols via `__all__` in `ip_geolocation_models.py`.
 - Changes in this file should remain synchronized with implementation updates in `ip_geolocation_models.py`.

@@ -492,7 +492,71 @@ Boundary and behavior rules:
 
 ---
 
+## 8.6 Publish path memory/performance contract (current implementation)
+
+The `publish_snapshot` path is the hot loop during both initial load and
+full-republish refreshes. It is implemented to be memory-efficient and O(N)
+across the full chunked stream:
+
+1. Incoming chunks are appended to an internal `_staging: list[_SnapshotEntry]`.
+2. While `is_final_chunk=False`:
+   - `service_state` remains `loading`.
+   - **Bootstrap mode (no active snapshot yet):** staging is progressively
+     visible so already-published chunks can resolve as `found`.
+   - **Refresh mode (active snapshot already exists):** the previous active
+     snapshot continues to serve reads; staging is hidden until final swap.
+3. On `is_final_chunk=True`:
+   - A single pass builds the new snapshot `tuple` and the
+     `_snapshot_keys: dict[str, int]` index (`network` → content hash).
+   - The snapshot pointer is swapped atomically under the service lock.
+   - `service_state` transitions to `ready`.
+
+Semantics (hybrid visibility):
+
+- During initial startup load, lookups can resolve `found` from already
+  published chunks.
+- During refresh reloads, lookups do not observe partially staged new data;
+  they keep reading the prior snapshot until the final atomic swap.
+
+This preserves startup UX while still removing the expensive O(N²) per-chunk
+full-snapshot rebuild pattern that previously hurt large datasets.
+
+## 8.7 Cached snapshot key index (`_snapshot_keys`)
+
+To support streaming equivalence checks and streaming delta apply without
+ever holding a second full copy of the dataset, the service maintains:
+
+- `_snapshot_keys: dict[str, int]` — `network` → `_record_value_hash(record)`.
+
+Lifecycle:
+
+- Rebuilt on every final-chunk swap in `publish_snapshot`.
+- Rebuilt after legacy `apply_snapshot_delta(...)` application.
+- Incrementally maintained by `apply_snapshot_delta_records(...)`.
+
+Exposed to the refresher via `get_active_network_key_index() -> dict | None`.
+Returns `None` when the service is not yet `ready`; this signals the
+refresher to take the streaming full-republish path (first load).
+
+## 8.8 Streaming delta apply (`apply_snapshot_delta_records`)
+
+`apply_snapshot_delta_records(added_or_updated_records, removed_networks, metadata)`
+is the memory-efficient counterpart of `apply_snapshot_delta`:
+
+- Accepts only the records that changed (added or updated) plus the set of
+  removed networks — never the full incoming dataset.
+- Rebuilds the snapshot tuple from the existing in-memory snapshot plus
+  deltas under the service lock.
+- Updates `_snapshot_keys` incrementally.
+- Returns `False` if the service is not yet `ready`; the refresher then
+  falls back to a full streaming republish.
+
+The legacy `apply_snapshot_delta(candidate, metadata)` and
+`is_snapshot_equivalent(candidate)` remain available for non-streaming
+adapters/tests; they now use `_snapshot_keys` internally for O(N) comparison.
+
 ## 9) Public Service Interface (Planned)
+
 
 Planned methods:
 

@@ -29,9 +29,14 @@ class IpGeolocationLookupRequestModel:
             raise ValueError("value must be a non-empty string")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class IpGeolocationRecordModel:
-    """Normalized IP geolocation record loaded from provider source."""
+    """Normalized IP geolocation record loaded from provider source.
+
+    Uses ``slots=True`` to remove per-instance ``__dict__`` overhead. This
+    materially reduces memory footprint when millions of records are held in
+    the active snapshot (typical full ipinfo dataset).
+    """
 
     network: str
     country: str
@@ -41,6 +46,7 @@ class IpGeolocationRecordModel:
     asn: str | None
     as_name: str | None
     as_domain: str | None
+
 
     def __post_init__(self) -> None:
         """Validate mandatory textual fields for normalized records."""

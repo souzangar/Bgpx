@@ -20,6 +20,30 @@ Hot-reload behavior
 - Event-level config is reloaded in-process when `logging_config.json` changes.
 - No backend process restart is required.
 - New JSON values apply to the next logging cycle/event emission.
+
+Performance model (memory + startup latency)
+--------------------------------------------
+This refresher was redesigned to avoid loading the full dataset into memory
+twice per refresh cycle and to start publishing chunks as soon as possible.
+
+- Streaming adapter path (``iter_read_results``) is preferred.
+- First load (no active snapshot): single streaming pass publishes chunks as
+  they are parsed; no pre-scan delay.
+- Subsequent refreshes (active snapshot exists and service exposes a key
+  index via ``get_active_key_index``): a compact streaming pre-scan builds
+  a ``dict[str, int]`` (network -> content-hash) of the incoming dataset and
+  diffs it against the service's cached key index.
+    * If equivalent: refresh is skipped entirely.
+    * If the change ratio is small (configurable ``delta_threshold_ratio``)
+      AND ``apply_snapshot_delta_records`` is available: a second streaming
+      pass materializes only the *changed* records and applies them as a
+      delta — keeping the expensive full-record allocation proportional to
+      the diff size rather than the dataset size.
+    * Otherwise: a full streaming republish is performed.
+
+The legacy non-streaming path (``read_records`` + ``is_snapshot_equivalent`` +
+``apply_snapshot_delta``) is preserved for adapters that do not expose
+``iter_read_results`` (used by tests and small fixtures).
 """
 
 from __future__ import annotations
@@ -36,6 +60,7 @@ from infra.ip_geolocation import (
     IpGeolocationIpinfoJsonFileReaderAdapter,
     IpGeolocationReadResult,
 )
+from models.ip_geolocation import IpGeolocationRecordModel
 from services.logging.logging_service import get_component_event_logger
 
 event_logger = get_component_event_logger("ip_geo_refresher", "bgpx.tasks.ip_geo.refresher")
@@ -53,7 +78,7 @@ _LOCALHOST_OVERRIDE_EXPECTED = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SourceFingerprint:
     """Lightweight source fingerprint used for change detection."""
 
@@ -64,12 +89,36 @@ class SourceFingerprint:
 PublishSnapshotCallable = Callable[[IpGeolocationReadResult, dict[str, object]], None]
 SnapshotEquivalentCallable = Callable[[IpGeolocationReadResult], bool]
 ApplySnapshotDeltaCallable = Callable[[IpGeolocationReadResult, dict[str, object]], bool]
+GetActiveKeyIndexCallable = Callable[[], "dict[str, int] | None"]
+ApplySnapshotDeltaRecordsCallable = Callable[
+    [list[IpGeolocationRecordModel], set[str], dict[str, object]],
+    bool,
+]
 
 
 class _ReaderAdapterProtocol(Protocol):
     """Protocol for dataset readers used by refresher."""
 
     def read_records(self) -> IpGeolocationReadResult: ...
+
+
+def _record_value_hash(record: IpGeolocationRecordModel) -> int:
+    """Compact content hash for a record (excluding network key).
+
+    Must stay in sync with ``IpGeolocationService._record_value_hash`` so
+    streaming equivalence/diff matches the service's cached key index.
+    """
+    return hash(
+        (
+            record.country,
+            record.country_code,
+            record.continent,
+            record.continent_code,
+            record.asn,
+            record.as_name,
+            record.as_domain,
+        )
+    )
 
 
 class IpGeolocationDataRefresher:
@@ -81,22 +130,28 @@ class IpGeolocationDataRefresher:
         publish_snapshot: PublishSnapshotCallable,
         is_snapshot_equivalent: SnapshotEquivalentCallable | None = None,
         apply_snapshot_delta: ApplySnapshotDeltaCallable | None = None,
+        get_active_key_index: GetActiveKeyIndexCallable | None = None,
+        apply_snapshot_delta_records: ApplySnapshotDeltaRecordsCallable | None = None,
         adapter: _ReaderAdapterProtocol | None = None,
         source_path: str | os.PathLike[str] = DATASET_PATH,
         debounce_seconds: float = 0.5,
         stat_func: Callable[[str | os.PathLike[str]], Any] = os.stat,
         sleep_func: Callable[[float], None] = time.sleep,
         publish_chunk_size: int = 50_000,
+        delta_threshold_ratio: float = 0.1,
     ) -> None:
         self._publish_snapshot = publish_snapshot
         self._is_snapshot_equivalent = is_snapshot_equivalent
         self._apply_snapshot_delta = apply_snapshot_delta
+        self._get_active_key_index = get_active_key_index
+        self._apply_snapshot_delta_records = apply_snapshot_delta_records
         self._adapter = adapter or IpGeolocationIpinfoJsonFileReaderAdapter()
         self._source_path = source_path
         self._debounce_seconds = debounce_seconds
         self._stat_func = stat_func
         self._sleep_func = sleep_func
         self._publish_chunk_size = publish_chunk_size
+        self._delta_threshold_ratio = delta_threshold_ratio
 
         self._last_fingerprint: SourceFingerprint | None = None
         self.last_refresh_error: str | None = None
@@ -106,12 +161,25 @@ class IpGeolocationDataRefresher:
         self.refresh_success_count: int = 0
         self.refresh_failure_count: int = 0
 
+    # ------------------------------------------------------------------
+    # Public entrypoint
+    # ------------------------------------------------------------------
+
     def run_once(self) -> None:
         """Run one poll cycle and publish when source change is detected."""
-        event_logger.log("poll_started", "DEBUG", "IP geolocation refresher poll tick started (path=%s)", self._source_path)
+        event_logger.log(
+            "poll_started",
+            "DEBUG",
+            "IP geolocation refresher poll tick started (path=%s)",
+            self._source_path,
+        )
         current = self._read_source_fingerprint()
         if self._handle_missing_source(current):
-            event_logger.log("source_missing", "DEBUG", "IP geolocation refresher poll tick skipped; source missing")
+            event_logger.log(
+                "source_missing",
+                "DEBUG",
+                "IP geolocation refresher poll tick skipped; source missing",
+            )
             return
         if current is None:
             event_logger.log(
@@ -142,6 +210,10 @@ class IpGeolocationDataRefresher:
 
         self._reload_and_publish(confirmed)
 
+    # ------------------------------------------------------------------
+    # Source change detection helpers
+    # ------------------------------------------------------------------
+
     def _handle_missing_source(self, current: SourceFingerprint | None) -> bool:
         if current is not None:
             return False
@@ -166,6 +238,10 @@ class IpGeolocationDataRefresher:
 
         return confirmed
 
+    # ------------------------------------------------------------------
+    # Refresh orchestration
+    # ------------------------------------------------------------------
+
     def _reload_and_publish(self, next_fingerprint: SourceFingerprint) -> None:
         """Rebuild dataset snapshot and publish only on successful parse/build."""
         refresh_started_at = time.monotonic()
@@ -182,33 +258,11 @@ class IpGeolocationDataRefresher:
         )
 
         try:
-            read_result = self._adapter.read_records()
-            self._log_localhost_override_validation(read_result)
-            if self._try_skip_for_equivalent_snapshot(read_result, next_fingerprint):
-                return
-
-            if self._try_apply_delta(read_result, next_fingerprint):
-                return
-
-            last_read_result = self._publish_refresh_result(
-                read_result,
-                next_fingerprint,
-                refresh_started_at,
-            )
-
-            if last_read_result is None:
-                return
-
-            self._mark_refresh_success(next_fingerprint)
-            event_logger.log(
-                "refresh_succeeded",
-                "INFO",
-                "IP geolocation snapshot refresh succeeded "
-                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
-                last_read_result.total_lines,
-                last_read_result.malformed_lines,
-                self.refresh_success_count,
-            )
+            iter_reader = getattr(self._adapter, "iter_read_results", None)
+            if callable(iter_reader):
+                self._reload_streaming(iter_reader, next_fingerprint, refresh_started_at)
+            else:
+                self._reload_non_streaming(next_fingerprint, refresh_started_at)
         except Exception as exc:
             self.last_refresh_error = str(exc) or exc.__class__.__name__
             self.refresh_failure_count += 1
@@ -219,40 +273,34 @@ class IpGeolocationDataRefresher:
                 self.last_refresh_error,
             )
 
-    def _log_localhost_override_validation(self, read_result: IpGeolocationReadResult) -> None:
-        """Log-only defensive validation for localhost override first-record presence."""
-        if not read_result.records:
-            event_logger.log(
-                "localhost_override_missing",
-                "WARNING",
-                "IP geolocation dataset is empty; localhost override first-record validation failed",
-            )
+    # ------------------------------------------------------------------
+    # Non-streaming path (legacy, used by adapters without iter_read_results)
+    # ------------------------------------------------------------------
+
+    def _reload_non_streaming(
+        self,
+        next_fingerprint: SourceFingerprint,
+        refresh_started_at: float,
+    ) -> None:
+        read_result = self._adapter.read_records()
+        self._log_localhost_override_validation(read_result)
+
+        if self._try_skip_for_equivalent_snapshot(read_result, next_fingerprint):
             return
 
-        first_record = read_result.records[0]
-        is_match = (
-            first_record.network == _LOCALHOST_OVERRIDE_EXPECTED["network"]
-            and first_record.country == _LOCALHOST_OVERRIDE_EXPECTED["country"]
-            and first_record.country_code == _LOCALHOST_OVERRIDE_EXPECTED["country_code"]
-            and first_record.continent == _LOCALHOST_OVERRIDE_EXPECTED["continent"]
-            and first_record.continent_code == _LOCALHOST_OVERRIDE_EXPECTED["continent_code"]
-            and first_record.asn == _LOCALHOST_OVERRIDE_EXPECTED["asn"]
-            and first_record.as_name == _LOCALHOST_OVERRIDE_EXPECTED["as_name"]
-            and first_record.as_domain == _LOCALHOST_OVERRIDE_EXPECTED["as_domain"]
-        )
-
-        if is_match:
-            event_logger.log(
-                "localhost_override_present",
-                "DEBUG",
-                "IP geolocation localhost override validation passed (first record verified)",
-            )
+        if self._try_apply_delta(read_result, next_fingerprint):
             return
 
+        self._publish_single_result(read_result, next_fingerprint, refresh_started_at)
+        self._mark_refresh_success(next_fingerprint)
         event_logger.log(
-            "localhost_override_missing",
-            "WARNING",
-            "IP geolocation localhost override validation failed; first record does not match expected override",
+            "refresh_succeeded",
+            "INFO",
+            "IP geolocation snapshot refresh succeeded "
+            "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+            read_result.total_lines,
+            read_result.malformed_lines,
+            self.refresh_success_count,
         )
 
     def _try_skip_for_equivalent_snapshot(
@@ -301,38 +349,222 @@ class IpGeolocationDataRefresher:
         )
         return True
 
-    def _publish_refresh_result(
-        self,
-        read_result: IpGeolocationReadResult,
-        next_fingerprint: SourceFingerprint,
-        refresh_started_at: float,
-    ) -> IpGeolocationReadResult | None:
-        iter_reader = getattr(self._adapter, "iter_read_results", None)
-        if callable(iter_reader):
-            return self._publish_chunked_results(iter_reader, next_fingerprint, refresh_started_at)
+    # ------------------------------------------------------------------
+    # Streaming path
+    # ------------------------------------------------------------------
 
-        self._publish_single_result(read_result, next_fingerprint, refresh_started_at)
-        return read_result
-
-    def _publish_chunked_results(
+    def _reload_streaming(
         self,
         iter_reader: Callable[..., object],
         next_fingerprint: SourceFingerprint,
         refresh_started_at: float,
-    ) -> IpGeolocationReadResult | None:
-        chunk_results = cast(
+    ) -> None:
+        active_index = self._get_active_index_for_diff()
+
+        if active_index is None:
+            # First load or service not ready / no key index support:
+            # single-pass chunked republish.
+            self._streaming_full_republish(
+                iter_reader,
+                next_fingerprint,
+                refresh_started_at,
+                pre_scan_first_record=None,
+                pre_scan_total_lines=None,
+                pre_scan_malformed_lines=None,
+            )
+            return
+
+        # Pass 1: compact streaming index scan. We only keep network->hash,
+        # NOT full record objects — parsed records from each chunk are
+        # dropped as soon as their fingerprint contribution is recorded.
+        incoming_index, first_record, total_lines, malformed_lines = self._streaming_pre_scan(iter_reader)
+
+        self._log_localhost_override_validation_for_record(first_record)
+
+        if incoming_index == active_index:
+            self._mark_refresh_success(next_fingerprint)
+            event_logger.log(
+                "refresh_skipped_equivalent",
+                "INFO",
+                "IP geolocation refresh skipped; source content unchanged "
+                "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+                total_lines,
+                malformed_lines,
+                self.refresh_success_count,
+            )
+            return
+
+        # Compute diff sets.
+        current_networks = set(active_index)
+        incoming_networks = set(incoming_index)
+        removed_networks = current_networks - incoming_networks
+        added_networks = incoming_networks - current_networks
+        updated_networks = {
+            network
+            for network in (current_networks & incoming_networks)
+            if active_index[network] != incoming_index[network]
+        }
+
+        if self._should_use_delta(
+            changed=len(removed_networks) + len(added_networks) + len(updated_networks),
+            current_size=len(current_networks),
+        ):
+            needed = added_networks | updated_networks
+            if self._streaming_delta_apply(
+                iter_reader=iter_reader,
+                next_fingerprint=next_fingerprint,
+                needed_networks=needed,
+                removed_networks=removed_networks,
+                total_lines=total_lines,
+                malformed_lines=malformed_lines,
+            ):
+                return
+
+        # Fallback to full streaming republish (pass 2).
+        self._streaming_full_republish(
+            iter_reader,
+            next_fingerprint,
+            refresh_started_at,
+            pre_scan_first_record=first_record,
+            pre_scan_total_lines=total_lines,
+            pre_scan_malformed_lines=malformed_lines,
+        )
+
+    def _get_active_index_for_diff(self) -> dict[str, int] | None:
+        if self._get_active_key_index is None or self._last_fingerprint is None:
+            return None
+        return self._get_active_key_index()
+
+    def _should_use_delta(self, *, changed: int, current_size: int) -> bool:
+        if self._apply_snapshot_delta_records is None:
+            return False
+        if current_size <= 0:
+            return False
+        if changed == 0:
+            # Covered by equivalence branch; be defensive.
+            return False
+        return (changed / current_size) <= self._delta_threshold_ratio
+
+    def _streaming_pre_scan(
+        self,
+        iter_reader: Callable[..., object],
+    ) -> tuple[dict[str, int], IpGeolocationRecordModel | None, int, int]:
+        """Stream the file once and build a compact incoming key index.
+
+        Peak memory is proportional to *one chunk* of records plus the
+        resulting ``dict[str, int]`` index — never the full record set.
+        """
+        chunks = cast(
+            Iterator[IpGeolocationReadResult],
+            iter_reader(chunk_size=self._publish_chunk_size),
+        )
+        incoming_index: dict[str, int] = {}
+        first_record: IpGeolocationRecordModel | None = None
+        total_lines = 0
+        malformed_lines = 0
+
+        for chunk in chunks:
+            if first_record is None and chunk.records:
+                first_record = chunk.records[0]
+            for record in chunk.records:
+                incoming_index[record.network] = _record_value_hash(record)
+            total_lines = chunk.total_lines
+            malformed_lines = chunk.malformed_lines
+
+        return incoming_index, first_record, total_lines, malformed_lines
+
+    def _streaming_delta_apply(
+        self,
+        *,
+        iter_reader: Callable[..., object],
+        next_fingerprint: SourceFingerprint,
+        needed_networks: set[str],
+        removed_networks: set[str],
+        total_lines: int,
+        malformed_lines: int,
+    ) -> bool:
+        """Pass 2 of streaming delta: materialize only changed records."""
+        if self._apply_snapshot_delta_records is None:
+            return False
+
+        changed_records: list[IpGeolocationRecordModel] = []
+
+        if needed_networks:
+            chunks = cast(
+                Iterator[IpGeolocationReadResult],
+                iter_reader(chunk_size=self._publish_chunk_size),
+            )
+            for chunk in chunks:
+                for record in chunk.records:
+                    if record.network in needed_networks:
+                        changed_records.append(record)
+
+        delta_metadata: dict[str, object] = {
+            "source_fingerprint": next_fingerprint,
+            "total_lines": total_lines,
+            "malformed_lines": malformed_lines,
+            "is_final_chunk": True,
+            "last_refresh_attempt_at": self.last_refresh_attempt_at,
+            "last_refresh_succeeded_at": datetime.now(UTC),
+            "refresh_attempt_count": self.refresh_attempt_count,
+            "refresh_success_count": self.refresh_success_count + 1,
+            "refresh_failure_count": self.refresh_failure_count,
+        }
+
+        applied = self._apply_snapshot_delta_records(changed_records, removed_networks, delta_metadata)
+        if not applied:
+            return False
+
+        self._mark_refresh_success(next_fingerprint)
+        event_logger.log(
+            "refresh_applied_delta",
+            "INFO",
+            "IP geolocation snapshot refresh applied as delta "
+            "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+            total_lines,
+            malformed_lines,
+            self.refresh_success_count,
+        )
+        return True
+
+    def _streaming_full_republish(
+        self,
+        iter_reader: Callable[..., object],
+        next_fingerprint: SourceFingerprint,
+        refresh_started_at: float,
+        *,
+        pre_scan_first_record: IpGeolocationRecordModel | None,
+        pre_scan_total_lines: int | None,
+        pre_scan_malformed_lines: int | None,
+    ) -> None:
+        chunks = cast(
             Iterator[IpGeolocationReadResult],
             iter_reader(chunk_size=self._publish_chunk_size),
         )
         chunk_index = 0
         published_records = 0
         last_read_result: IpGeolocationReadResult | None = None
-        current_chunk = next(chunk_results, None)
+
+        current_chunk = next(chunks, None)
+
+        # Validate localhost override only once per refresh, based on the
+        # first observed record across the dataset (prefer pre-scan record).
+        override_validated = False
+        if pre_scan_first_record is not None:
+            self._log_localhost_override_validation_for_record(pre_scan_first_record)
+            override_validated = True
 
         while current_chunk is not None:
-            next_chunk = next(chunk_results, None)
+            next_chunk = next(chunks, None)
             chunk_index += 1
             is_final_chunk = next_chunk is None
+
+            if not override_validated:
+                first_record = current_chunk.records[0] if current_chunk.records else None
+                if first_record is not None or is_final_chunk:
+                    self._log_localhost_override_validation_for_record(first_record)
+                    override_validated = True
+
             metadata = self._build_publish_metadata(
                 current_chunk,
                 next_fingerprint,
@@ -350,7 +582,87 @@ class IpGeolocationDataRefresher:
             last_read_result = current_chunk
             current_chunk = next_chunk
 
-        return last_read_result
+        if last_read_result is None:
+            # Empty file: emit a synthetic empty final publish so service
+            # state swaps atomically to `ready` with zero records.
+            empty_result = IpGeolocationReadResult(
+                records=[],
+                total_lines=pre_scan_total_lines or 0,
+                malformed_lines=pre_scan_malformed_lines or 0,
+            )
+            if not override_validated:
+                self._log_localhost_override_validation_for_record(None)
+            metadata = self._build_publish_metadata(empty_result, next_fingerprint, is_final_chunk=True)
+            self._publish_snapshot(empty_result, metadata)
+            self._log_chunk_publish(
+                chunk_index=1,
+                is_final_chunk=True,
+                read_result=empty_result,
+                refresh_started_at=refresh_started_at,
+                published_records=0,
+            )
+            last_read_result = empty_result
+
+        self._mark_refresh_success(next_fingerprint)
+        event_logger.log(
+            "refresh_succeeded",
+            "INFO",
+            "IP geolocation snapshot refresh succeeded "
+            "(total_lines=%s, malformed_lines=%s, success_count=%s)",
+            last_read_result.total_lines,
+            last_read_result.malformed_lines,
+            self.refresh_success_count,
+        )
+
+    # ------------------------------------------------------------------
+    # Localhost override validation
+    # ------------------------------------------------------------------
+
+    def _log_localhost_override_validation(self, read_result: IpGeolocationReadResult) -> None:
+        """Log-only defensive validation for localhost override first-record presence."""
+        first_record = read_result.records[0] if read_result.records else None
+        self._log_localhost_override_validation_for_record(first_record)
+
+    def _log_localhost_override_validation_for_record(
+        self,
+        first_record: IpGeolocationRecordModel | None,
+    ) -> None:
+        if first_record is None:
+            event_logger.log(
+                "localhost_override_missing",
+                "WARNING",
+                "IP geolocation dataset is empty; localhost override first-record validation failed",
+            )
+            return
+
+        is_match = (
+            first_record.network == _LOCALHOST_OVERRIDE_EXPECTED["network"]
+            and first_record.country == _LOCALHOST_OVERRIDE_EXPECTED["country"]
+            and first_record.country_code == _LOCALHOST_OVERRIDE_EXPECTED["country_code"]
+            and first_record.continent == _LOCALHOST_OVERRIDE_EXPECTED["continent"]
+            and first_record.continent_code == _LOCALHOST_OVERRIDE_EXPECTED["continent_code"]
+            and first_record.asn == _LOCALHOST_OVERRIDE_EXPECTED["asn"]
+            and first_record.as_name == _LOCALHOST_OVERRIDE_EXPECTED["as_name"]
+            and first_record.as_domain == _LOCALHOST_OVERRIDE_EXPECTED["as_domain"]
+        )
+
+        if is_match:
+            event_logger.log(
+                "localhost_override_present",
+                "DEBUG",
+                "IP geolocation localhost override validation passed (first record verified)",
+            )
+            return
+
+        event_logger.log(
+            "localhost_override_missing",
+            "WARNING",
+            "IP geolocation localhost override validation failed; first record does not match expected override",
+        )
+
+    # ------------------------------------------------------------------
+    # Publish helpers
+    # ------------------------------------------------------------------
 
     def _publish_single_result(
         self,
@@ -424,6 +736,8 @@ class IpGeolocationDataRefresher:
 
 __all__ = [
     "ApplySnapshotDeltaCallable",
+    "ApplySnapshotDeltaRecordsCallable",
+    "GetActiveKeyIndexCallable",
     "IpGeolocationDataRefresher",
     "PublishSnapshotCallable",
     "SnapshotEquivalentCallable",

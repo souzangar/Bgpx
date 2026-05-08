@@ -136,8 +136,8 @@ def test_publish_non_final_chunk_keeps_service_loading_and_unresolved_lookup_ini
     assert unresolved.resolution_state == "initializing_db"
 
 
-def test_publish_non_final_chunk_allows_found_lookup_from_loaded_chunks() -> None:
-    """Lookup should resolve found records already loaded in non-final chunks."""
+def test_publish_non_final_chunk_exposes_staged_records_during_bootstrap() -> None:
+    """Bootstrap load should progressively expose already-published chunks."""
     service = IpGeolocationService()
 
     service.publish_snapshot(
@@ -155,6 +155,41 @@ def test_publish_non_final_chunk_allows_found_lookup_from_loaded_chunks() -> Non
     assert payload.resolution_state == "found"
     assert isinstance(payload.data, IpGeolocationLookupDataModel)
     assert payload.data.network == "8.8.8.0/24"
+
+
+def test_publish_non_final_chunk_does_not_expose_staged_records_during_refresh() -> None:
+    """Refresh load should keep old snapshot visible until final atomic swap."""
+    service = IpGeolocationService()
+
+    baseline = IpGeolocationReadResult(
+        records=[
+            _record("9.9.9.0/24", "Quad9"),
+        ],
+        total_lines=1,
+        malformed_lines=0,
+    )
+    service.publish_snapshot(baseline, {})
+
+    service.publish_snapshot(
+        _sample_read_result(),
+        {
+            "is_final_chunk": False,
+            "total_lines": 10,
+            "malformed_lines": 0,
+        },
+    )
+
+    old_payload = service.lookup_ip_geolocation("9.9.9.9")
+    assert old_payload.status == "success"
+    assert old_payload.service_state == "loading"
+    assert old_payload.resolution_state == "found"
+    assert isinstance(old_payload.data, IpGeolocationLookupDataModel)
+    assert old_payload.data.network == "9.9.9.0/24"
+
+    staged_payload = service.lookup_ip_geolocation("8.8.8.8")
+    assert staged_payload.status == "success"
+    assert staged_payload.service_state == "loading"
+    assert staged_payload.resolution_state == "initializing_db"
 
 
 def test_lookup_found_after_publish_returns_found_with_geo_payload() -> None:
