@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { BackgroundDecor } from './components/BackgroundDecor'
-import { TopNav, type HealthIndicatorTone } from './components/TopNav'
-import { fetchClientIpInfo, fetchHealth, fetchPing, fetchTraceroute } from './lib/api'
+import { TopNav } from './components/TopNav'
+import { fetchClientIpInfo, fetchPing, fetchTraceroute } from './lib/api'
 import { normalizeHostInput, toErrorMessage, validateHostInput } from './lib/format'
-import type { ClientIpInfoResponse, HealthResponse, PingResponse, RequestState, TracerouteResponse } from './lib/types'
-import { ApiExamples } from './sections/ApiExamples'
+import type { ClientIpInfoResponse, PingResponse, RequestState, TracerouteResponse } from './lib/types'
 import { Hero } from './sections/Hero'
 import { Tools } from './sections/Tools'
 
@@ -18,11 +17,6 @@ function emptyState<T>(): RequestState<T> {
 }
 
 function App() {
-  const [healthState, setHealthState] = useState<RequestState<HealthResponse>>({
-    loading: true,
-    error: null,
-    data: null,
-  })
   const [pingHost, setPingHost] = useState('1.1.1.1')
   const [pingValidationError, setPingValidationError] = useState<string | null>(null)
   const [pingState, setPingState] = useState<RequestState<PingResponse>>(emptyState)
@@ -35,7 +29,6 @@ function App() {
     data: null,
   })
 
-  const healthAbortRef = useRef<AbortController | null>(null)
   const clientIpInfoAbortRef = useRef<AbortController | null>(null)
   const pingAbortRef = useRef<AbortController | null>(null)
   const tracerouteAbortRef = useRef<AbortController | null>(null)
@@ -101,28 +94,9 @@ function App() {
   }, [tracerouteHost])
 
   useEffect(() => {
-    healthAbortRef.current?.abort()
-    const controller = new AbortController()
-    healthAbortRef.current = controller
-
     clientIpInfoAbortRef.current?.abort()
     const clientIpInfoController = new AbortController()
     clientIpInfoAbortRef.current = clientIpInfoController
-
-    const bootstrapHealth = async () => {
-      try {
-        const result = await fetchHealth(controller.signal)
-        if (controller.signal.aborted) {
-          return
-        }
-        setHealthState({ loading: false, error: null, data: result })
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return
-        }
-        setHealthState({ loading: false, error: toErrorMessage(error), data: null })
-      }
-    }
 
     const bootstrapClientIpInfo = async () => {
       try {
@@ -139,11 +113,9 @@ function App() {
       }
     }
 
-    void bootstrapHealth()
     void bootstrapClientIpInfo()
 
     return () => {
-      controller.abort()
       clientIpInfoController.abort()
       pingAbortRef.current?.abort()
       tracerouteAbortRef.current?.abort()
@@ -158,26 +130,10 @@ function App() {
     document.getElementById('api-examples')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
-  const topNavHealth = useMemo<{ label: string; tone: HealthIndicatorTone }>(() => {
-    if (healthState.loading) {
-      return { label: 'Checking API', tone: 'pending' }
-    }
-
-    if (healthState.error) {
-      return { label: 'API error', tone: 'error' }
-    }
-
-    if (healthState.data?.status.toLowerCase() === 'ok') {
-      return { label: 'API online', tone: 'success' }
-    }
-
-    return { label: 'API degraded', tone: 'warning' }
-  }, [healthState])
-
   return (
     <div className="min-h-screen bg-bgpx-black text-bgpx-ink">
       <BackgroundDecor />
-      <TopNav healthLabel={topNavHealth.label} healthTone={topNavHealth.tone} onFocusPrimaryInput={focusPingInput} />
+      <TopNav />
 
       <div className="mx-auto max-w-7xl px-4 py-8">
         <main className="min-w-0 space-y-10">
@@ -198,7 +154,6 @@ function App() {
             onTracerouteHostChange={setTracerouteHost}
             onRunTraceroute={runTraceroute}
           />
-          <ApiExamples />
         </main>
       </div>
     </div>
